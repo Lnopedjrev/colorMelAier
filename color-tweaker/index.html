@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ColorTweaker</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1><span>Color</span>Tweaker</h1>
+    <div class="toolbar">
+      <button class="btn" id="btn-export-css">Export CSS</button>
+      <button class="btn" id="btn-export-html">Export HTML</button>
+    </div>
+  </header>
+  <main>
+    <div class="editor-panel">
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="html">HTML</button>
+        <button class="tab" data-tab="css">CSS</button>
+        <button class="tab" data-tab="js">JS</button>
+        <button class="tab" data-tab="upload">Upload</button>
+        <button class="tab" data-tab="mocks">Mocks<span id="mock-badge"></span></button>
+      </div>
+      <div class="editor-wrap">
+        <textarea id="ed-html" spellcheck="false"></textarea>
+        <textarea id="ed-css" class="hidden" spellcheck="false"></textarea>
+        <textarea id="ed-js" class="hidden" spellcheck="false"></textarea>
+
+        <div id="panel-upload" class="panel hidden">
+          <div class="drop-zone" id="drop-zone">
+            <p>Drop <code>dist/</code> folder here or click to browse</p>
+            <input type="file" id="file-input" webkitdirectory multiple hidden>
+          </div>
+          <div class="file-chips" id="build-files"></div>
+          <div class="upload-section">
+            <label>TypeScript types (optional)</label>
+            <input type="file" id="ts-input" accept=".ts,.d.ts" multiple>
+          </div>
+          <div class="file-chips" id="ts-files"></div>
+          <button class="btn-load" id="btn-load" disabled>Load Build</button>
+        </div>
+
+        <div id="panel-mocks" class="panel hidden">
+          <div id="mocks-list"><div class="empty">No failed requests captured yet</div></div>
+          <button class="btn-apply-mocks hidden" id="btn-apply-mocks">Apply Mocks &amp; Reload</button>
+        </div>
+      </div>
+      <div class="color-panel">
+        <div class="cp-head">
+          <h3>Parsed Colors</h3>
+          <div class="cp-head-right">
+            <span class="pill" id="cp-count">0</span>
+            <button class="btn-reset" id="btn-reset">Reset</button>
+          </div>
+        </div>
+        <div class="color-list" id="color-list"></div>
+      </div>
+    </div>
+    <div class="preview-panel">
+      <div class="preview-head"><h3>Preview</h3></div>
+      <iframe id="preview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+    </div>
+  </main>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

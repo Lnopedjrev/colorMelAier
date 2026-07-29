@@ -1,77 +1,83 @@
-// Entry point — wires all modules, manages tabs, sets defaults
-
-import { state } from './state.js';
-import { debounce } from './utils.js';
-import { extractColors } from './css-parser.js';
-import { initPreview, updatePreview, patchCss, getProcessedCss } from './preview.js';
-import { initColorPanel, renderColorPanel } from './color-panel.js';
-import { initMocks, updateMockBadge, renderMocksPanel } from './mocks.js';
-import { initUpload, loadBuild } from './upload.js';
+import { state } from "./state.js";
+import { debounce } from "./utils.js";
+import { extractColors } from "./css-parser.js";
+import {
+  initPreview,
+  updatePreview,
+  patchCss,
+  getProcessedCss,
+} from "./preview.js";
+import { initColorPanel, renderColorPanel } from "./color-panel.js";
+import { initMocks, updateMockBadge, renderMocksPanel } from "./mocks.js";
+import { initUpload, loadBuild } from "./upload.js";
 
 // ---- DOM References ----
 const ed = {
-  html: document.getElementById('ed-html'),
-  css:  document.getElementById('ed-css'),
-  js:   document.getElementById('ed-js')
+  html: document.getElementById("ed-html"),
+  css: document.getElementById("ed-css"),
+  js: document.getElementById("ed-js"),
 };
-const preview    = document.getElementById('preview');
-const panelUpload = document.getElementById('panel-upload');
-const panelMocks  = document.getElementById('panel-mocks');
+const preview = document.getElementById("preview");
+const panelUpload = document.getElementById("panel-upload");
+const panelMocks = document.getElementById("panel-mocks");
 
 // ---- Initialize Modules ----
 initPreview(preview);
 
 initColorPanel(
-  document.getElementById('color-list'),
-  document.getElementById('cp-count'),
-  () => ed.css.value
+  document.getElementById("color-list"),
+  document.getElementById("cp-count"),
+  () => ed.css.value,
 );
 
 initMocks(
-  document.getElementById('mocks-list'),
-  document.getElementById('btn-apply-mocks'),
-  document.getElementById('mock-badge'),
-  () => loadBuild()
+  document.getElementById("mocks-list"),
+  document.getElementById("btn-apply-mocks"),
+  document.getElementById("mock-badge"),
+  () => loadBuild(),
 );
 
 initUpload(
   {
-    dropZone:   document.getElementById('drop-zone'),
-    fileInput:  document.getElementById('file-input'),
-    tsInput:    document.getElementById('ts-input'),
-    btnLoad:    document.getElementById('btn-load'),
-    buildChips: document.getElementById('build-files'),
-    tsChips:    document.getElementById('ts-files'),
-    cssEditor:  ed.css
+    dropZone: document.getElementById("drop-zone"),
+    fileInput: document.getElementById("file-input"),
+    tsInput: document.getElementById("ts-input"),
+    btnLoad: document.getElementById("btn-load"),
+    buildChips: document.getElementById("build-files"),
+    tsChips: document.getElementById("ts-files"),
+    cssEditor: ed.css,
   },
-  { onBuildLoaded: () => renderMocksPanel() }
+  { onBuildLoaded: () => renderMocksPanel() },
 );
 
 // ---- Tab Switching ----
-document.getElementById('tabs').addEventListener('click', (e) => {
-  const tab = e.target.closest('.tab');
+document.getElementById("tabs").addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab");
   if (!tab) return;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  tab.classList.add('active');
+  document
+    .querySelectorAll(".tab")
+    .forEach((t) => t.classList.remove("active"));
+  tab.classList.add("active");
   const key = tab.dataset.tab;
-  Object.keys(ed).forEach(k => ed[k].classList.add('hidden'));
-  panelUpload.classList.add('hidden');
-  panelMocks.classList.add('hidden');
-  if (ed[key]) ed[key].classList.remove('hidden');
-  else if (key === 'upload') panelUpload.classList.remove('hidden');
-  else if (key === 'mocks') panelMocks.classList.remove('hidden');
+  Object.keys(ed).forEach((k) => ed[k].classList.add("hidden"));
+  panelUpload.classList.add("hidden");
+  panelMocks.classList.add("hidden");
+  if (ed[key]) ed[key].classList.remove("hidden");
+  else if (key === "upload") panelUpload.classList.remove("hidden");
+  else if (key === "mocks") panelMocks.classList.remove("hidden");
 });
 
 // ---- Tab Key Support ----
-Object.values(ed).forEach(textarea => {
-  textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Tab') {
+Object.values(ed).forEach((textarea) => {
+  textarea.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
       e.preventDefault();
       const s = textarea.selectionStart;
       const end = textarea.selectionEnd;
-      textarea.value = textarea.value.substring(0, s) + '  ' + textarea.value.substring(end);
+      textarea.value =
+        textarea.value.substring(0, s) + "  " + textarea.value.substring(end);
       textarea.selectionStart = textarea.selectionEnd = s + 2;
-      textarea.dispatchEvent(new Event('input'));
+      textarea.dispatchEvent(new Event("input"));
     }
   });
 });
@@ -85,15 +91,18 @@ function parseAndRefresh() {
   updatePreview(ed.html.value, ed.css.value, ed.js.value);
 }
 
-const debouncedParse   = debounce(parseAndRefresh, 300);
-const debouncedPreview = debounce(() => updatePreview(ed.html.value, ed.css.value, ed.js.value), 200);
+const debouncedParse = debounce(parseAndRefresh, 300);
+const debouncedPreview = debounce(
+  () => updatePreview(ed.html.value, ed.css.value, ed.js.value),
+  200,
+);
 
-ed.css.addEventListener('input', debouncedParse);
-ed.html.addEventListener('input', debouncedPreview);
-ed.js.addEventListener('input', debouncedPreview);
+ed.css.addEventListener("input", debouncedParse);
+ed.html.addEventListener("input", debouncedPreview);
+ed.js.addEventListener("input", debouncedPreview);
 
 // ---- Reset ----
-document.getElementById('btn-reset').addEventListener('click', () => {
+document.getElementById("btn-reset").addEventListener("click", () => {
   state.replacements.clear();
   state.alphaOverrides.clear();
   renderColorPanel();
@@ -103,22 +112,27 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 // ---- Export ----
 function download(content, filename, type) {
   const blob = new Blob([content], { type });
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;
   a.click();
   URL.revokeObjectURL(a.href);
 }
 
-document.getElementById('btn-export-css').addEventListener('click', () => {
-  download(getProcessedCss(ed.css.value), 'styles.css', 'text/css');
+document.getElementById("btn-export-css").addEventListener("click", () => {
+  download(getProcessedCss(ed.css.value), "styles.css", "text/css");
 });
 
-document.getElementById('btn-export-html').addEventListener('click', () => {
-  const full = '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<style>\n' +
-    getProcessedCss(ed.css.value) + '\n</style>\n</head>\n<body>\n' +
-    ed.html.value + '\n<script>\n' + ed.js.value + '\n<\/script>\n</body>\n</html>';
-  download(full, 'index.html', 'text/html');
+document.getElementById("btn-export-html").addEventListener("click", () => {
+  const full =
+    '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<style>\n' +
+    getProcessedCss(ed.css.value) +
+    "\n</style>\n</head>\n<body>\n" +
+    ed.html.value +
+    "\n<script>\n" +
+    ed.js.value +
+    "\n<\/script>\n</body>\n</html>";
+  download(full, "index.html", "text/html");
 });
 
 // ---- Default Sample Content ----

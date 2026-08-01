@@ -30,6 +30,15 @@
         <textarea id="ed-js" class="hidden" spellcheck="false"></textarea>
 
         <div id="panel-upload" class="panel hidden">
+          <div class="url-loader">
+            <label for="site-url">Website URL</label>
+            <div class="url-loader-row">
+              <input type="url" id="site-url" placeholder="https://example.com" autocomplete="url">
+              <button class="btn-load btn-load-url" id="btn-load-url">Load URL</button>
+            </div>
+            <div class="load-status" id="url-status" aria-live="polite"></div>
+          </div>
+          <div class="upload-divider"><span>or load a local build</span></div>
           <div class="drop-zone" id="drop-zone">
             <p>Drop <code>dist/</code> folder here or click to browse</p>
             <input type="file" id="file-input" webkitdirectory multiple hidden>

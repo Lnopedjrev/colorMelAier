@@ -2,7 +2,7 @@
 
 import { state } from "./state.js";
 import { parseTypeScript } from "./ts-parser.js";
-import { loadBuildHtml } from "./preview.js";
+import { loadBuildHtml, loadSiteUrl, readSiteCss } from "./preview.js";
 import { updateMockBadge } from "./mocks.js";
 import { extractColors } from "./css-parser.js";
 import { renderColorPanel } from "./color-panel.js";
@@ -14,8 +14,17 @@ export function initUpload(elements, callbacks) {
   cssEditorEl = elements.cssEditor;
   onBuildLoaded = callbacks.onBuildLoaded;
 
-  const { dropZone, fileInput, tsInput, btnLoad, buildChips, tsChips } =
-    elements;
+  const {
+    dropZone,
+    fileInput,
+    tsInput,
+    btnLoad,
+    buildChips,
+    tsChips,
+    siteUrl,
+    btnLoadUrl,
+    urlStatus,
+  } = elements;
 
   dropZone.addEventListener("click", () => fileInput.click());
   dropZone.addEventListener("dragover", (e) => {
@@ -37,6 +46,67 @@ export function initUpload(elements, callbacks) {
     handleTsFiles(e.target.files, tsChips),
   );
   btnLoad.addEventListener("click", () => loadBuild());
+  btnLoadUrl.addEventListener("click", () =>
+    loadUrl(siteUrl, btnLoadUrl, urlStatus),
+  );
+  siteUrl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") loadUrl(siteUrl, btnLoadUrl, urlStatus);
+  });
+}
+
+function setUrlStatus(el, message, type = "") {
+  el.textContent = message;
+  el.className = "load-status" + (type ? " " + type : "");
+}
+
+async function loadUrl(input, button, statusEl) {
+  let url;
+  try {
+    url = new URL(input.value.trim());
+    if (!/^https?:$/.test(url.protocol)) throw new Error();
+  } catch (error) {
+    setUrlStatus(statusEl, "Enter a valid http:// or https:// URL.", "error");
+    return;
+  }
+
+  button.disabled = true;
+  setUrlStatus(statusEl, "Loading site in preview…");
+
+  try {
+    await loadSiteUrl(url.href);
+    setUrlStatus(statusEl, "Site loaded. Inspecting CSS…");
+
+    const { css, skipped } = readSiteCss();
+    cssEditorEl.value = css;
+    state.colorEntries = extractColors(css);
+    state.replacements.clear();
+    state.alphaOverrides.clear();
+    renderColorPanel();
+    if (onBuildLoaded) onBuildLoaded();
+
+    if (!css) {
+      setUrlStatus(
+        statusEl,
+        skipped
+          ? "Site loaded, but its stylesheets could not be inspected."
+          : "Site loaded, but no CSS was found.",
+        "error",
+      );
+    } else {
+      const suffix = skipped
+        ? ` ${skipped} cross-origin stylesheet${skipped === 1 ? " was" : "s were"} skipped.`
+        : "";
+      setUrlStatus(
+        statusEl,
+        `Site loaded. Found ${state.colorEntries.length} color${state.colorEntries.length === 1 ? "" : "s"}.${suffix}`,
+        "success",
+      );
+    }
+  } catch (error) {
+    setUrlStatus(statusEl, error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function handleBuildFiles(fileList, btnLoad, chipsEl) {
@@ -100,9 +170,9 @@ function findHtmlFile() {
   if (state.buildFileMap.has("/index.html")) {
     return { path: "/index.html", file: state.buildFileMap.get("/index.html") };
   }
-  for (const [path, file] of state.buildFileMap) {
-    if (file.name === "index.html") return { path, file };
-  }
+  // for (const [path, file] of state.buildFileMap) {
+  //   if (file.name === "index.html") return { path, file };
+  // }
   for (const [path, file] of state.buildFileMap) {
     if (path.endsWith(".html")) return { path, file };
   }
@@ -209,7 +279,7 @@ async function loadBuild() {
 
   const found = findHtmlFile();
   if (!found) {
-    alert("No index.html found in uploaded files");
+    alert("No html file found in uploaded files");
     return;
   }
   const { path: htmlPath, file: htmlFile } = found;
@@ -221,7 +291,7 @@ async function loadBuild() {
   const blobMap = new Map();
   for (const [path, file] of state.buildFileMap) {
     if (path === htmlPath) continue;
-    if (htmlDir && !path.startsWith(htmlDir + "/")) continue;
+    if (htmlDir && !path.startsWith(htmlDir + "/")) continue; // if html is a root, ignore; if not, consume only files that in folder with html;
     const relativePath = htmlDir
       ? path.substring(htmlDir.length + 1)
       : path.substring(1);

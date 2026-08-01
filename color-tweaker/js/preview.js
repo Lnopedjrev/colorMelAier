@@ -5,6 +5,7 @@ import { extractAlpha, hexToRgba } from './utils.js';
 
 let iframeEl = null;
 let currentBlobUrl = null;
+let isSiteUrl = false;
 
 const IFRAME_LISTENER =
   'window.addEventListener("message",function(e){' +
@@ -13,6 +14,10 @@ const IFRAME_LISTENER =
 
 export function initPreview(iframe) {
   iframeEl = iframe;
+}
+
+export function isSiteUrlActive() {
+  return isSiteUrl;
 }
 
 // Apply all color replacements to raw CSS text
@@ -54,7 +59,68 @@ function navigateIframe(html) {
   if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
   const blob = new Blob([html], { type: 'text/html' });
   currentBlobUrl = URL.createObjectURL(blob);
+  isSiteUrl = false;
   iframeEl.src = currentBlobUrl;
+}
+
+// Navigate directly to a website and resolve after the iframe load event.
+export function loadSiteUrl(url) {
+  if (currentBlobUrl) {
+    URL.revokeObjectURL(currentBlobUrl);
+    currentBlobUrl = null;
+  }
+  isSiteUrl = true;
+
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error('The site did not finish loading within 15 seconds.'));
+    }, 15000);
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      iframeEl.removeEventListener('load', onLoad);
+      iframeEl.removeEventListener('error', onError);
+    };
+    const onLoad = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error('The site could not be loaded in the iframe.'));
+    };
+
+    iframeEl.addEventListener('load', onLoad, { once: true });
+    iframeEl.addEventListener('error', onError, { once: true });
+    iframeEl.src = url;
+  });
+}
+
+// The browser permits CSSOM access only for same-origin pages/stylesheets.
+export function readSiteCss() {
+  let doc;
+  try {
+    doc = iframeEl.contentDocument;
+    void iframeEl.contentWindow.location.href;
+  } catch (error) {
+    throw new Error('The site loaded, but its CSS is cross-origin and cannot be inspected by the browser.');
+  }
+
+  if (!doc) throw new Error('The site loaded, but its document is not accessible.');
+
+  const chunks = [];
+  let skipped = 0;
+  for (const sheet of Array.from(doc.styleSheets)) {
+    if (sheet.ownerNode && sheet.ownerNode.id === '__ct') continue;
+    try {
+      chunks.push(Array.from(sheet.cssRules, rule => rule.cssText).join('\n'));
+    } catch (error) {
+      skipped++;
+    }
+  }
+
+  return { css: chunks.filter(Boolean).join('\n\n'), skipped };
 }
 
 // Full rebuild — editor mode (HTML/CSS/JS textareas)
@@ -70,7 +136,21 @@ export function updatePreview(rawHtml, rawCss, rawJs) {
 
 // CSS-only patch via postMessage (no iframe reload)
 export function patchCss(rawCss) {
-  if (iframeEl && iframeEl.contentWindow) {
+  if (isSiteUrl) {
+    try {
+      const doc = iframeEl.contentDocument;
+      void iframeEl.contentWindow.location.href;
+      let style = doc.getElementById('__ct');
+      if (!style) {
+        style = doc.createElement('style');
+        style.id = '__ct';
+        (doc.head || doc.documentElement).appendChild(style);
+      }
+      style.textContent = getProcessedCss(rawCss);
+    } catch (error) {
+      // Cross-origin pages cannot be modified from the parent application.
+    }
+  } else if (iframeEl && iframeEl.contentWindow) {
     iframeEl.contentWindow.postMessage(
       { type: 'css-update', css: getProcessedCss(rawCss) }, '*'
     );

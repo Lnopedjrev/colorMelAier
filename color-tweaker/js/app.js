@@ -6,6 +6,7 @@ import {
   updatePreview,
   patchCss,
   getProcessedCss,
+  isSiteUrlActive,
 } from "./preview.js";
 import { initColorPanel, renderColorPanel } from "./color-panel.js";
 import { initMocks, updateMockBadge, renderMocksPanel } from "./mocks.js";
@@ -46,6 +47,9 @@ initUpload(
     buildChips: document.getElementById("build-files"),
     tsChips: document.getElementById("ts-files"),
     cssEditor: ed.css,
+    siteUrl: document.getElementById("site-url"),
+    btnLoadUrl: document.getElementById("btn-load-url"),
+    urlStatus: document.getElementById("url-status"),
   },
   { onBuildLoaded: () => renderMocksPanel() },
 );
@@ -88,7 +92,8 @@ function parseAndRefresh() {
   state.replacements.clear();
   state.alphaOverrides.clear();
   renderColorPanel();
-  updatePreview(ed.html.value, ed.css.value, ed.js.value);
+  if (isSiteUrlActive()) patchCss(ed.css.value);
+  else updatePreview(ed.html.value, ed.css.value, ed.js.value);
 }
 
 const debouncedParse = debounce(parseAndRefresh, 300);

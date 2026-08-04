@@ -76,7 +76,13 @@ async function loadUrl(input, button, statusEl) {
     await loadSiteUrl(url.href);
     setUrlStatus(statusEl, "Site loaded. Inspecting CSS…");
 
-    const { css, skipped } = readSiteCss();
+    cssEditorEl.value = "";
+    state.colorEntries = [];
+    state.replacements.clear();
+    state.alphaOverrides.clear();
+    renderColorPanel();
+
+    const { css, skipped } = await readSiteCss();
     cssEditorEl.value = css;
     state.colorEntries = extractColors(css);
     state.replacements.clear();

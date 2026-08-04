@@ -6,6 +6,8 @@ import { extractAlpha, hexToRgba } from './utils.js';
 let iframeEl = null;
 let currentBlobUrl = null;
 let isSiteUrl = false;
+let siteMessageOrigin = "*";
+let requestSequence = 0;
 
 const IFRAME_LISTENER =
   'window.addEventListener("message",function(e){' +
@@ -70,7 +72,9 @@ export function loadSiteUrl(url) {
     currentBlobUrl = null;
   }
   isSiteUrl = true;
+  siteMessageOrigin = "*";
 
+  // Turn the iframe's one-shot events into an awaitable navigation result.
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       cleanup();
@@ -97,30 +101,71 @@ export function loadSiteUrl(url) {
   });
 }
 
-// The browser permits CSSOM access only for same-origin pages/stylesheets.
-export function readSiteCss() {
-  let doc;
-  try {
-    doc = iframeEl.contentDocument;
-    void iframeEl.contentWindow.location.href;
-  } catch (error) {
-    throw new Error('The site loaded, but its CSS is cross-origin and cannot be inspected by the browser.');
-  }
-
-  if (!doc) throw new Error('The site loaded, but its document is not accessible.');
-
+function serializeStyleSheets(styleSheets) {
   const chunks = [];
   let skipped = 0;
-  for (const sheet of Array.from(doc.styleSheets)) {
-    if (sheet.ownerNode && sheet.ownerNode.id === '__ct') continue;
+  const visited = new Set();
+
+  function visit(sheet) {
+    if (!sheet || visited.has(sheet)) return;
+    visited.add(sheet);
+    if (sheet.ownerNode && sheet.ownerNode.id === '__ct') return;
+
     try {
-      chunks.push(Array.from(sheet.cssRules, rule => rule.cssText).join('\n'));
+      for (const rule of Array.from(sheet.cssRules)) {
+        if (rule.type === 3 && rule.styleSheet) visit(rule.styleSheet);
+        else chunks.push(rule.cssText);
+      }
     } catch (error) {
       skipped++;
     }
   }
 
+  for (const sheet of Array.from(styleSheets)) visit(sheet);
   return { css: chunks.filter(Boolean).join('\n\n'), skipped };
+}
+
+function requestSiteCss() {
+  return new Promise((resolve, reject) => {
+    const requestId = 'ct-css-' + Date.now() + '-' + (++requestSequence);
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(
+        'The site is cross-origin and did not answer the CSS query. Add color-tweaker-bridge.js to its index.html.',
+      ));
+    }, 3000);
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      window.removeEventListener('message', onMessage);
+    };
+    const onMessage = (event) => {
+      if (event.source !== iframeEl.contentWindow) return;
+      if (!event.data || event.data.type !== 'ct-css-response') return;
+      if (event.data.requestId !== requestId) return;
+      cleanup();
+      siteMessageOrigin = event.origin;
+      resolve({
+        css: typeof event.data.css === 'string' ? event.data.css : '',
+        skipped: Number(event.data.skipped) || 0,
+      });
+    };
+
+    window.addEventListener('message', onMessage);
+    iframeEl.contentWindow.postMessage({ type: 'ct-css-request', requestId }, '*');
+  });
+}
+
+// Read directly for same-origin pages; otherwise ask the optional dev-server bridge.
+export async function readSiteCss() {
+  try {
+    const doc = iframeEl.contentDocument;
+    void iframeEl.contentWindow.location.href;
+    if (!doc) throw new Error();
+    return serializeStyleSheets(doc.styleSheets);
+  } catch (error) {
+    return requestSiteCss();
+  }
 }
 
 // Full rebuild — editor mode (HTML/CSS/JS textareas)
@@ -148,7 +193,10 @@ export function patchCss(rawCss) {
       }
       style.textContent = getProcessedCss(rawCss);
     } catch (error) {
-      // Cross-origin pages cannot be modified from the parent application.
+      iframeEl.contentWindow.postMessage(
+        { type: 'ct-css-update', css: getProcessedCss(rawCss) },
+        siteMessageOrigin,
+      );
     }
   } else if (iframeEl && iframeEl.contentWindow) {
     iframeEl.contentWindow.postMessage(

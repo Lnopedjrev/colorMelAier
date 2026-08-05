@@ -2,3 +2,6 @@ README.md
 .env
 REPORT.md
 .claude
+vite.config.js
+.git
+.vite/

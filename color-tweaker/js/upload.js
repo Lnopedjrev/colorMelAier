@@ -74,6 +74,7 @@ async function loadUrl(input, button, statusEl) {
 
   try {
     await loadSiteUrl(url.href);
+    if (onBuildLoaded) onBuildLoaded("url");
     setUrlStatus(statusEl, "Site loaded. Inspecting CSS…");
 
     cssEditorEl.value = "";
@@ -88,8 +89,6 @@ async function loadUrl(input, button, statusEl) {
     state.replacements.clear();
     state.alphaOverrides.clear();
     renderColorPanel();
-    if (onBuildLoaded) onBuildLoaded();
-
     if (!css) {
       setUrlStatus(
         statusEl,
@@ -448,7 +447,7 @@ async function loadBuild() {
   renderColorPanel();
 
   loadBuildHtml("<!DOCTYPE html>" + doc.documentElement.outerHTML);
-  if (onBuildLoaded) onBuildLoaded();
+  if (onBuildLoaded) onBuildLoaded("build");
 }
 
 export { loadBuild };

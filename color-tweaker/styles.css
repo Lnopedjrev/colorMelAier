@@ -52,6 +52,8 @@ main{display:flex;flex:1;min-height:0}
 }
 .tab:hover{color:var(--text)}
 .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab.guarded{opacity:.45;cursor:not-allowed}
+.tab.guarded:hover{color:var(--text-muted)}
 
 .editor-wrap{flex:1;min-height:0;position:relative}
 .editor-wrap textarea{

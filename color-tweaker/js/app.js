@@ -19,6 +19,7 @@ const ed = {
   js: document.getElementById("ed-js"),
 };
 const preview = document.getElementById("preview");
+const tabs = document.getElementById("tabs");
 const panelUpload = document.getElementById("panel-upload");
 const panelMocks = document.getElementById("panel-mocks");
 
@@ -51,18 +52,45 @@ initUpload(
     btnLoadUrl: document.getElementById("btn-load-url"),
     urlStatus: document.getElementById("url-status"),
   },
-  { onBuildLoaded: () => renderMocksPanel() },
+  {
+    onBuildLoaded: (source) => {
+      renderMocksPanel();
+      setSiteTabsGuarded(source === "url");
+    },
+  },
 );
 
 // ---- Tab Switching ----
-document.getElementById("tabs").addEventListener("click", (e) => {
+function setSiteTabsGuarded(guarded) {
+  for (const key of ["html", "js"]) {
+    const tab = tabs.querySelector(`[data-tab="${key}"]`);
+    tab.classList.toggle("guarded", guarded);
+    tab.setAttribute("aria-disabled", String(guarded));
+    if (guarded) {
+      tab.title = "Opening this editor can replace the loaded site preview";
+    } else {
+      tab.removeAttribute("title");
+    }
+  }
+}
+
+tabs.addEventListener("click", (e) => {
   const tab = e.target.closest(".tab");
   if (!tab) return;
+  const key = tab.dataset.tab;
+
+  if (tab.classList.contains("guarded")) {
+    const confirmed = window.confirm(
+      `Changing ${key.toUpperCase()} will immediately replace the loaded site's iframe content. Continue?`,
+    );
+    if (!confirmed) return;
+    setSiteTabsGuarded(false);
+  }
+
   document
     .querySelectorAll(".tab")
     .forEach((t) => t.classList.remove("active"));
   tab.classList.add("active");
-  const key = tab.dataset.tab;
   Object.keys(ed).forEach((k) => ed[k].classList.add("hidden"));
   panelUpload.classList.add("hidden");
   panelMocks.classList.add("hidden");

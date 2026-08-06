@@ -8,18 +8,108 @@ let currentBlobUrl = null;
 let isSiteUrl = false;
 let siteMessageOrigin = "*";
 let requestSequence = 0;
+let inspectorActive = false;
+let inspectorDocument = null;
+let onColorsPicked = null;
+
+const INSPECTED_COLOR_PROPERTIES = [
+  'color',
+  'background-color',
+  'border-top-color',
+  'border-right-color',
+  'border-bottom-color',
+  'border-left-color',
+  'outline-color',
+  'text-decoration-color',
+  'column-rule-color',
+  'caret-color',
+  'fill',
+  'stroke',
+];
 
 const IFRAME_LISTENER =
   'window.addEventListener("message",function(e){' +
   'if(e.data&&e.data.type==="css-update"){' +
   'var s=document.getElementById("__ct");if(s)s.textContent=e.data.css;}});';
 
-export function initPreview(iframe) {
+export function initPreview(iframe, callbacks = {}) {
   iframeEl = iframe;
+  onColorsPicked = callbacks.onColorsPicked || null;
+  iframeEl.addEventListener('load', syncInspector);
+  window.addEventListener('message', (event) => {
+    if (event.source !== iframeEl.contentWindow) return;
+    if (!event.data || event.data.type !== 'ct-colors-picked') return;
+    if (onColorsPicked) onColorsPicked(event.data.colors || []);
+  });
 }
 
 export function isSiteUrlActive() {
   return isSiteUrl;
+}
+
+function collectElementColors(element) {
+  const computed = element.ownerDocument.defaultView.getComputedStyle(element);
+  const colors = new Set();
+  for (const property of INSPECTED_COLOR_PROPERTIES) {
+    const value = computed.getPropertyValue(property).trim();
+    if (
+      value &&
+      value !== 'none' &&
+      value !== 'transparent' &&
+      value !== 'rgba(0, 0, 0, 0)'
+    ) {
+      colors.add(value);
+    }
+  }
+  return Array.from(colors);
+}
+
+function handleInspectedClick(event) {
+  if (!inspectorActive) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (onColorsPicked) onColorsPicked(collectElementColors(event.target));
+}
+
+function setInspectorCursor(doc, active) {
+  let style = doc.getElementById('__ct-inspector');
+  if (active && !style) {
+    style = doc.createElement('style');
+    style.id = '__ct-inspector';
+    style.textContent = '*{cursor:crosshair!important}';
+    (doc.head || doc.documentElement).appendChild(style);
+  } else if (!active && style) {
+    style.remove();
+  }
+}
+
+function syncInspector() {
+  if (inspectorDocument) {
+    inspectorDocument.removeEventListener('click', handleInspectedClick, true);
+    setInspectorCursor(inspectorDocument, false);
+    inspectorDocument = null;
+  }
+
+  try {
+    const doc = iframeEl.contentDocument;
+    void iframeEl.contentWindow.location.href;
+    if (!doc) throw new Error();
+    inspectorDocument = doc;
+    if (inspectorActive) {
+      doc.addEventListener('click', handleInspectedClick, true);
+      setInspectorCursor(doc, true);
+    }
+  } catch (error) {
+    iframeEl.contentWindow.postMessage(
+      { type: 'ct-inspect-mode', active: inspectorActive },
+      siteMessageOrigin,
+    );
+  }
+}
+
+export function setPreviewInspector(active) {
+  inspectorActive = active;
+  syncInspector();
 }
 
 // Apply all color replacements to raw CSS text

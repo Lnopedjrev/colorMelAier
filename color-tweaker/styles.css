@@ -94,6 +94,7 @@ main{display:flex;flex:1;min-height:0}
   color:var(--text-muted);cursor:pointer;font-family:var(--sans);
 }
 .btn-reset:hover{color:var(--text);border-color:var(--text-muted)}
+.btn-reset.active{color:var(--accent);border-color:var(--accent);background:#58a6ff18}
 
 .color-list{padding:2px 0}
 .color-entry{
@@ -101,6 +102,9 @@ main{display:flex;flex:1;min-height:0}
   transition:background .1s;
 }
 .color-entry:hover{background:var(--surface)}
+.color-entry.highlighted{
+  background:#58a6ff18;box-shadow:inset 3px 0 var(--accent);
+}
 
 .swatch{
   width:24px;height:24px;border-radius:5px;

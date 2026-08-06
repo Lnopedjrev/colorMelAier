@@ -7,6 +7,22 @@
 
   const script = document.currentScript;
   const allowedOrigin = script && script.dataset.colorTweakerOrigin;
+  let inspectorOrigin = null;
+
+  const inspectedColorProperties = [
+    "color",
+    "background-color",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+    "outline-color",
+    "text-decoration-color",
+    "column-rule-color",
+    "caret-color",
+    "fill",
+    "stroke",
+  ];
 
   function accepts(event) {
     return (
@@ -49,6 +65,51 @@
     style.textContent = css;
   }
 
+  function collectElementColors(element) {
+    const computed = window.getComputedStyle(element);
+    const colors = new Set();
+    for (const property of inspectedColorProperties) {
+      const value = computed.getPropertyValue(property).trim();
+      if (
+        value &&
+        value !== "none" &&
+        value !== "transparent" &&
+        value !== "rgba(0, 0, 0, 0)"
+      ) {
+        colors.add(value);
+      }
+    }
+    return Array.from(colors);
+  }
+
+  function handleInspectedClick(event) {
+    if (!inspectorOrigin) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    window.parent.postMessage(
+      { type: "ct-colors-picked", colors: collectElementColors(event.target) },
+      inspectorOrigin,
+    );
+  }
+
+  function setInspector(active, origin) {
+    inspectorOrigin = active ? origin : null;
+    document.removeEventListener("click", handleInspectedClick, true);
+
+    let style = document.getElementById("__ct-inspector");
+    if (active) {
+      document.addEventListener("click", handleInspectedClick, true);
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "__ct-inspector";
+        style.textContent = "*{cursor:crosshair!important}";
+        (document.head || document.documentElement).appendChild(style);
+      }
+    } else if (style) {
+      style.remove();
+    }
+  }
+
   window.addEventListener("message", (event) => {
     if (!accepts(event) || !event.data) return;
 
@@ -68,6 +129,8 @@
       typeof event.data.css === "string"
     ) {
       applyCss(event.data.css);
+    } else if (event.data.type === "ct-inspect-mode") {
+      setInspector(Boolean(event.data.active), event.origin);
     }
   });
 })();

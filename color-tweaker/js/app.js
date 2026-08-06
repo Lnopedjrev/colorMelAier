@@ -7,8 +7,13 @@ import {
   patchCss,
   getProcessedCss,
   isSiteUrlActive,
+  setPreviewInspector,
 } from "./preview.js";
-import { initColorPanel, renderColorPanel } from "./color-panel.js";
+import {
+  initColorPanel,
+  renderColorPanel,
+  highlightColorEntries,
+} from "./color-panel.js";
 import { initMocks, updateMockBadge, renderMocksPanel } from "./mocks.js";
 import { initUpload, loadBuild } from "./upload.js";
 
@@ -20,11 +25,14 @@ const ed = {
 };
 const preview = document.getElementById("preview");
 const tabs = document.getElementById("tabs");
+const btnInspectColor = document.getElementById("btn-inspect-color");
 const panelUpload = document.getElementById("panel-upload");
 const panelMocks = document.getElementById("panel-mocks");
 
 // ---- Initialize Modules ----
-initPreview(preview);
+initPreview(preview, {
+  onColorsPicked: (colors) => highlightColorEntries(colors),
+});
 
 initColorPanel(
   document.getElementById("color-list"),
@@ -59,6 +67,14 @@ initUpload(
     },
   },
 );
+
+btnInspectColor.addEventListener("click", () => {
+  const active = btnInspectColor.getAttribute("aria-pressed") !== "true";
+  btnInspectColor.setAttribute("aria-pressed", String(active));
+  btnInspectColor.classList.toggle("active", active);
+  btnInspectColor.textContent = active ? "Inspecting…" : "Inspect";
+  setPreviewInspector(active);
+});
 
 // ---- Tab Switching ----
 function setSiteTabsGuarded(guarded) {

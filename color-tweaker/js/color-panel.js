@@ -1,7 +1,12 @@
 // Color panel rendering — swatches, pickers, alpha sliders
 
 import { state } from "./state.js";
-import { hexToRgba, entryHasAlpha, getEntryAlpha } from "./utils.js";
+import {
+  hexToRgba,
+  entryHasAlpha,
+  getEntryAlpha,
+  toCanonical,
+} from "./utils.js";
 import { patchCss } from "./preview.js";
 
 let colorListEl = null;
@@ -108,4 +113,27 @@ export function renderColorPanel() {
   colorListEl
     .querySelectorAll('.alpha-row input[type="range"]')
     .forEach((input) => input.addEventListener("input", onAlphaPick));
+}
+
+export function highlightColorEntries(colors) {
+  const canonicalColors = new Set(
+    colors.map((color) => toCanonical(color)).filter(Boolean),
+  );
+  let firstMatch = null;
+  let matchCount = 0;
+
+  colorListEl.querySelectorAll(".color-entry").forEach((row) => {
+    const entry = state.colorEntries[Number(row.dataset.idx)];
+    const matches = entry && canonicalColors.has(entry.canonical);
+    row.classList.toggle("highlighted", Boolean(matches));
+    if (matches) {
+      matchCount++;
+      if (!firstMatch) firstMatch = row;
+    }
+  });
+
+  if (firstMatch) {
+    firstMatch.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  return matchCount;
 }

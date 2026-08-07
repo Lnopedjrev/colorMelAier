@@ -5,3 +5,4 @@ REPORT.md
 vite.config.js
 .git
 .vite/
+build-examples/

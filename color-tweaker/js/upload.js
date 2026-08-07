@@ -175,9 +175,9 @@ function findHtmlFile() {
   if (state.buildFileMap.has("/index.html")) {
     return { path: "/index.html", file: state.buildFileMap.get("/index.html") };
   }
-  // for (const [path, file] of state.buildFileMap) {
-  //   if (file.name === "index.html") return { path, file };
-  // }
+  for (const [path, file] of state.buildFileMap) {
+    if (file.name === "index.html") return { path, file };
+  }
   for (const [path, file] of state.buildFileMap) {
     if (path.endsWith(".html")) return { path, file };
   }
@@ -185,10 +185,17 @@ function findHtmlFile() {
 }
 
 function findFileByRelativePath(relativePath, htmlDir) {
-  const fullPath = htmlDir + "/" + relativePath;
-  if (state.buildFileMap.has(fullPath)) return state.buildFileMap.get(fullPath);
+  const clean = cleanHref(relativePath);
+  const candidates = [];
 
-  const name = relativePath.split("/").pop().split("?")[0];
+  if (htmlDir) candidates.push(htmlDir + "/" + clean);
+  candidates.push("/" + clean);
+
+  for (const path of candidates) {
+    if (state.buildFileMap.has(path)) return state.buildFileMap.get(path);
+  }
+
+  const name = clean.split("/").pop();
   for (const [path, file] of state.buildFileMap) {
     if (path.endsWith("/" + name) || path === "/" + name) return file;
   }
@@ -197,10 +204,26 @@ function findFileByRelativePath(relativePath, htmlDir) {
 
 function cleanHref(href) {
   if (!href) return "";
+  if (/^(?:data|blob|https?):/i.test(href)) return href;
   return href
     .replace(/^\.?\//, "")
     .split("?")[0]
     .split("#")[0];
+}
+
+function blobUrlForRef(ref, blobMap, htmlDir) {
+  const clean = cleanHref(ref);
+  if (!clean || /^(?:data|blob|https?):/i.test(clean)) return null;
+  if (blobMap.has(clean)) return blobMap.get(clean);
+
+  const file = findFileByRelativePath(clean, htmlDir);
+  if (!file) return null;
+
+  const name = clean.split("/").pop();
+  for (const [rel, url] of blobMap) {
+    if (rel === clean || rel.endsWith("/" + name) || rel === name) return url;
+  }
+  return null;
 }
 
 function rewriteUrlsInCss(css, blobMap) {
@@ -279,7 +302,6 @@ function buildCaptureScript(mocks) {
 
 async function loadBuild() {
   state.failedEndpoints.clear();
-  Object.keys(state.mockData).forEach((k) => delete state.mockData[k]);
   updateMockBadge();
 
   const found = findHtmlFile();
@@ -326,6 +348,7 @@ async function loadBuild() {
     if (!/\.(js|mjs)$/.test(rel)) continue;
     importEntries["./" + rel] = url;
     importEntries[rel] = url;
+    importEntries["/" + rel] = url;
   }
 
   doc.querySelectorAll('script[type="module"]').forEach(() => {
@@ -339,7 +362,7 @@ async function loadBuild() {
     doc.head.insertBefore(mapEl, doc.head.firstChild);
     console.log(
       "[CT] import map:",
-      Object.keys(importEntries).length / 2,
+      Object.keys(importEntries).length / 3,
       "modules",
     );
   }
@@ -347,13 +370,13 @@ async function loadBuild() {
   // ---- inline CSS <link>s with url() rewriting ----
   let allCss = "";
   let firstInlinedStyle = null;
+  const inlinedStyleEls = new Set();
 
   for (const link of Array.from(
     doc.querySelectorAll('link[rel="stylesheet"]'),
   )) {
     const href = link.getAttribute("href");
-    const clean = cleanHref(href);
-    const file = findFileByRelativePath(clean, htmlDir);
+    const file = findFileByRelativePath(href, htmlDir);
     if (file) {
       let content = await file.text();
       content = rewriteUrlsInCss(content, blobMap);
@@ -361,42 +384,52 @@ async function loadBuild() {
       const style = doc.createElement("style");
       style.textContent = content;
       link.replaceWith(style);
+      inlinedStyleEls.add(style);
       if (!firstInlinedStyle) firstInlinedStyle = style;
     }
   }
 
   // also collect pre-existing <style> content (Angular critical CSS)
   for (const style of Array.from(doc.querySelectorAll("style"))) {
-    if (style === firstInlinedStyle) continue;
+    if (inlinedStyleEls.has(style)) continue;
     if (style.type === "importmap") continue;
     const rewritten = rewriteUrlsInCss(style.textContent, blobMap);
     if (rewritten !== style.textContent) style.textContent = rewritten;
+    allCss += style.textContent + "\n";
   }
 
-  // ---- rewrite icon / resource links ----
+  // ---- rewrite icon / preload / resource links ----
   doc
     .querySelectorAll(
-      'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]',
+      [
+        'link[rel="icon"]',
+        'link[rel="shortcut icon"]',
+        'link[rel="apple-touch-icon"]',
+        'link[rel="modulepreload"]',
+        'link[rel="preload"][href]',
+      ].join(","),
     )
     .forEach((link) => {
-      const clean = cleanHref(link.getAttribute("href"));
-      if (blobMap.has(clean)) link.setAttribute("href", blobMap.get(clean));
+      const blobUrl = blobUrlForRef(
+        link.getAttribute("href"),
+        blobMap,
+        htmlDir,
+      );
+      if (blobUrl) link.setAttribute("href", blobUrl);
     });
 
   // ---- handle scripts ----
   for (const script of Array.from(doc.querySelectorAll("script[src]"))) {
     const src = script.getAttribute("src");
-    const clean = cleanHref(src);
+    const blobUrl = blobUrlForRef(src, blobMap, htmlDir);
 
     if (script.type === "module") {
       // module scripts: keep external, rewrite src to blob URL
       // import map handles all their import() / import from ... calls
-      if (blobMap.has(clean)) {
-        script.setAttribute("src", blobMap.get(clean));
-      }
+      if (blobUrl) script.setAttribute("src", blobUrl);
     } else {
       // non-module scripts: inline them
-      const file = findFileByRelativePath(clean, htmlDir);
+      const file = findFileByRelativePath(src, htmlDir);
       if (file) {
         const content = await file.text();
         const inline = doc.createElement("script");
@@ -405,8 +438,8 @@ async function loadBuild() {
         if (script.async) inline.async = true;
         inline.textContent = content;
         script.replaceWith(inline);
-      } else if (blobMap.has(clean)) {
-        script.setAttribute("src", blobMap.get(clean));
+      } else if (blobUrl) {
+        script.setAttribute("src", blobUrl);
       }
     }
   }

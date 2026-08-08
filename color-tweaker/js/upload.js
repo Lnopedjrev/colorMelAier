@@ -269,6 +269,65 @@ function rewriteUrlsInCss(css, blobMap) {
   return result;
 }
 
+function normalizeModulePath(path) {
+  const parts = [];
+  for (const part of path.replace(/\\/g, "/").split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts.join("/");
+}
+
+function moduleAlias(relativePath) {
+  return "@ct/" + relativePath;
+}
+
+function resolveModulePath(specifier, importerPath, modulePaths) {
+  if (!specifier.startsWith(".") && !specifier.startsWith("/")) return null;
+
+  const clean = specifier.split("?")[0].split("#")[0];
+  const importerDir = importerPath.includes("/")
+    ? importerPath.substring(0, importerPath.lastIndexOf("/"))
+    : "";
+  const candidate = normalizeModulePath(
+    clean.startsWith("/") ? clean.substring(1) : importerDir + "/" + clean,
+  );
+  if (modulePaths.has(candidate)) return candidate;
+
+  const filename = candidate.split("/").pop();
+  const matches = Array.from(modulePaths).filter(
+    (path) => path === filename || path.endsWith("/" + filename),
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function rewriteModuleSpecifiers(source, importerPath, modulePaths) {
+  const replaceSpecifier = (prefix, quote, specifier, suffix = "") => {
+    const resolved = resolveModulePath(specifier, importerPath, modulePaths);
+    return resolved
+      ? prefix + quote + moduleAlias(resolved) + quote + suffix
+      : prefix + quote + specifier + quote + suffix;
+  };
+
+  let result = source.replace(
+    /(\b(?:import|export)\s*[^"'`;]*?\bfrom\s*)(["'])([^"']+)\2/g,
+    (match, prefix, quote, specifier) =>
+      replaceSpecifier(prefix, quote, specifier),
+  );
+  result = result.replace(
+    /(\bimport\s*)(["'])([^"']+)\2/g,
+    (match, prefix, quote, specifier) =>
+      replaceSpecifier(prefix, quote, specifier),
+  );
+  result = result.replace(
+    /(\bimport\s*\(\s*)(["'])([^"']+)\2(\s*\))/g,
+    (match, prefix, quote, specifier, suffix) =>
+      replaceSpecifier(prefix, quote, specifier, suffix),
+  );
+  return result;
+}
+
 function buildCaptureScript(mocks) {
   var s = "(function(){";
   s += "var __MOCKS__=" + JSON.stringify(mocks) + ";";
@@ -314,17 +373,41 @@ async function loadBuild() {
 
   console.log("[CT] HTML:", htmlPath, "| dir:", htmlDir || "/");
 
-  // ---- blob URLs for every asset under htmlDir ----
+  // ---- blob URLs for non-module assets under htmlDir ----
   const blobMap = new Map();
+  const moduleFiles = new Map();
   for (const [path, file] of state.buildFileMap) {
     if (path === htmlPath) continue;
     if (htmlDir && !path.startsWith(htmlDir + "/")) continue; // if html is a root, ignore; if not, consume only files that in folder with html;
     const relativePath = htmlDir
       ? path.substring(htmlDir.length + 1)
       : path.substring(1);
+
+    if (/\.(?:js|mjs)$/.test(relativePath)) {
+      moduleFiles.set(relativePath, file);
+      continue;
+    }
+
     const buf = await file.arrayBuffer();
     const blob = new Blob([buf], { type: getMimeType(file.name) });
     blobMap.set(relativePath, URL.createObjectURL(blob));
+  }
+
+  // blob: URLs cannot resolve relative ESM imports. Rewrite module references
+  // to bare @ct/* aliases first, then map those aliases to the final blobs.
+  const modulePaths = new Set(moduleFiles.keys());
+  const importEntries = {};
+  for (const [relativePath, file] of moduleFiles) {
+    const source = await file.text();
+    const rewritten = rewriteModuleSpecifiers(
+      source,
+      relativePath,
+      modulePaths,
+    );
+    const blob = new Blob([rewritten], { type: getMimeType(file.name) });
+    const url = URL.createObjectURL(blob);
+    blobMap.set(relativePath, url);
+    importEntries[moduleAlias(relativePath)] = url;
   }
   console.log("[CT]", blobMap.size, "assets → blob URLs");
 
@@ -341,15 +424,8 @@ async function loadBuild() {
     .querySelectorAll('link[rel="manifest"], script[src*="ngsw"]')
     .forEach((el) => el.remove());
 
-  // ---- import map for all JS/MJS (handles static + dynamic import()) ----
-  const importEntries = {};
+  // ---- import map for rewritten JS/MJS aliases ----
   let hasModuleScripts = false;
-  for (const [rel, url] of blobMap) {
-    if (!/\.(js|mjs)$/.test(rel)) continue;
-    importEntries["./" + rel] = url;
-    importEntries[rel] = url;
-    importEntries["/" + rel] = url;
-  }
 
   doc.querySelectorAll('script[type="module"]').forEach(() => {
     hasModuleScripts = true;
@@ -362,7 +438,7 @@ async function loadBuild() {
     doc.head.insertBefore(mapEl, doc.head.firstChild);
     console.log(
       "[CT] import map:",
-      Object.keys(importEntries).length / 3,
+      Object.keys(importEntries).length,
       "modules",
     );
   }
@@ -424,8 +500,7 @@ async function loadBuild() {
     const blobUrl = blobUrlForRef(src, blobMap, htmlDir);
 
     if (script.type === "module") {
-      // module scripts: keep external, rewrite src to blob URL
-      // import map handles all their import() / import from ... calls
+      // Module source has already been rewritten to @ct/* import-map aliases.
       if (blobUrl) script.setAttribute("src", blobUrl);
     } else {
       // non-module scripts: inline them

@@ -63,7 +63,7 @@ initUpload(
   {
     onBuildLoaded: (source) => {
       renderMocksPanel();
-      setSiteTabsGuarded(source === "url");
+      setSiteTabsGuarded(source === "url" || source === "build");
     },
   },
 );
@@ -83,7 +83,7 @@ function setSiteTabsGuarded(guarded) {
     tab.classList.toggle("guarded", guarded);
     tab.setAttribute("aria-disabled", String(guarded));
     if (guarded) {
-      tab.title = "Opening this editor can replace the loaded site preview";
+      tab.title = "Opening this editor can replace the loaded preview";
     } else {
       tab.removeAttribute("title");
     }
@@ -97,7 +97,7 @@ tabs.addEventListener("click", (e) => {
 
   if (tab.classList.contains("guarded")) {
     const confirmed = window.confirm(
-      `Changing ${key.toUpperCase()} will immediately replace the loaded site's iframe content. Continue?`,
+      `Changing ${key.toUpperCase()} will immediately replace the loaded iframe content. Continue?`,
     );
     if (!confirmed) return;
     setSiteTabsGuarded(false);

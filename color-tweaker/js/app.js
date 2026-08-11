@@ -1,15 +1,17 @@
 import { state } from "./state.js";
 import { debounce } from "./utils.js";
-import { extractColors } from "./css-parser.js";
 import {
   initPreview,
   updatePreview,
   patchCss,
   getProcessedCss,
-  isSiteUrlActive,
   setPreviewInspector,
+  parseAndRefresh,
+  download,
 } from "./preview.js";
+import { getCssEditorText } from "./css-sources.js";
 import {
+  setSiteTabsGuarded,
   initColorPanel,
   renderColorPanel,
   highlightColorEntries,
@@ -32,12 +34,15 @@ const panelMocks = document.getElementById("panel-mocks");
 // ---- Initialize Modules ----
 initPreview(preview, {
   onColorsPicked: (colors) => highlightColorEntries(colors),
+  onCssSourcesChanged: () => {
+    ed.css.value = getCssEditorText();
+    renderColorPanel();
+  },
 });
 
 initColorPanel(
   document.getElementById("color-list"),
   document.getElementById("cp-count"),
-  () => ed.css.value,
 );
 
 initMocks(
@@ -75,20 +80,6 @@ btnInspectColor.addEventListener("click", () => {
   btnInspectColor.textContent = active ? "Inspecting…" : "Inspect";
   setPreviewInspector(active);
 });
-
-// ---- Tab Switching ----
-function setSiteTabsGuarded(guarded) {
-  for (const key of ["html", "js"]) {
-    const tab = tabs.querySelector(`[data-tab="${key}"]`);
-    tab.classList.toggle("guarded", guarded);
-    tab.setAttribute("aria-disabled", String(guarded));
-    if (guarded) {
-      tab.title = "Opening this editor can replace the loaded preview";
-    } else {
-      tab.removeAttribute("title");
-    }
-  }
-}
 
 tabs.addEventListener("click", (e) => {
   const tab = e.target.closest(".tab");
@@ -130,16 +121,6 @@ Object.values(ed).forEach((textarea) => {
   });
 });
 
-// ---- Parse + Preview ----
-function parseAndRefresh() {
-  state.colorEntries = extractColors(ed.css.value);
-  state.replacements.clear();
-  state.alphaOverrides.clear();
-  renderColorPanel();
-  if (isSiteUrlActive()) patchCss(ed.css.value);
-  else updatePreview(ed.html.value, ed.css.value, ed.js.value);
-}
-
 const debouncedParse = debounce(parseAndRefresh, 300);
 const debouncedPreview = debounce(
   () => updatePreview(ed.html.value, ed.css.value, ed.js.value),
@@ -155,27 +136,17 @@ document.getElementById("btn-reset").addEventListener("click", () => {
   state.replacements.clear();
   state.alphaOverrides.clear();
   renderColorPanel();
-  patchCss(ed.css.value);
+  patchCss();
 });
 
-// ---- Export ----
-function download(content, filename, type) {
-  const blob = new Blob([content], { type });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
 document.getElementById("btn-export-css").addEventListener("click", () => {
-  download(getProcessedCss(ed.css.value), "styles.css", "text/css");
+  download(getProcessedCss(), "styles.css", "text/css");
 });
 
 document.getElementById("btn-export-html").addEventListener("click", () => {
   const full =
     '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<style>\n' +
-    getProcessedCss(ed.css.value) +
+    getProcessedCss() +
     "\n</style>\n</head>\n<body>\n" +
     ed.html.value +
     "\n<script>\n" +

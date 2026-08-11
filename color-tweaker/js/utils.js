@@ -41,9 +41,28 @@ export function isValidColor(str) {
 
 export function toCanonical(color) {
   if (!isValidColor(color)) return null;
-  _ctx.fillStyle = '#000000';
+  _ctx.fillStyle = "#010203";
   _ctx.fillStyle = color.trim();
-  return _ctx.fillStyle;
+  const firstParse = _ctx.fillStyle;
+  _ctx.fillStyle = "#040506";
+  _ctx.fillStyle = color.trim();
+  const secondParse = _ctx.fillStyle;
+  if (firstParse !== secondParse) return null;
+
+  _ctx.clearRect(0, 0, 1, 1);
+  _ctx.fillStyle = firstParse;
+  _ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = _ctx.getImageData(0, 0, 1, 1).data;
+  if (a === 0) {
+    const transparent = firstParse.match(
+      /rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)\D+0(?:\.0+)?\s*\)/,
+    );
+    return transparent
+      ? `rgba(${transparent[1]}, ${transparent[2]}, ${transparent[3]}, 0)`
+      : null;
+  }
+  if (a < 255) return `rgba(${r}, ${g}, ${b}, ${Math.round((a / 255) * 1000) / 1000})`;
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
 export function canonicalToHex6(c) {
@@ -54,8 +73,30 @@ export function canonicalToHex6(c) {
 }
 
 export function extractAlpha(str) {
-  const m = str.match(/,\s*([\d.]+)\s*\)\s*$/);
-  return m ? parseFloat(m[1]) : null;
+  const value = str.trim();
+  const hex = value.match(/^#[0-9a-f]{3}([0-9a-f])$/i) ||
+    value.match(/^#[0-9a-f]{6}([0-9a-f]{2})$/i);
+  if (hex) {
+    return parseInt(hex[1].length === 1 ? hex[1] + hex[1] : hex[1], 16) / 255;
+  }
+
+  const slashAlpha = value.match(/\/\s*([\d.]+)(%)?\s*\)\s*$/);
+  if (slashAlpha) {
+    const alpha = parseFloat(slashAlpha[1]);
+    return slashAlpha[2] ? alpha / 100 : alpha;
+  }
+
+  const commaAlpha = /^(?:rgba|hsla)\(/i.test(value)
+    ? value.match(/,\s*([\d.]+)(%)?\s*\)\s*$/)
+    : null;
+  if (commaAlpha) {
+    const alpha = parseFloat(commaAlpha[1]);
+    return commaAlpha[2] ? alpha / 100 : alpha;
+  }
+
+  const canonical = toCanonical(value);
+  const normalized = canonical && canonical.match(/rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/);
+  return normalized ? parseFloat(normalized[1]) : null;
 }
 
 export function hexToRgba(hex6, alpha) {
@@ -73,7 +114,8 @@ export function entryHasAlpha(entry) {
 }
 
 export function getEntryAlpha(entry, alphaOverrides) {
-  if (alphaOverrides.has(entry.canonical)) return alphaOverrides.get(entry.canonical);
+  const key = entry.id || entry.canonical;
+  if (alphaOverrides.has(key)) return alphaOverrides.get(key);
   for (const orig of entry.originals) {
     const a = extractAlpha(orig);
     if (a !== null) return a;

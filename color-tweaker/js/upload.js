@@ -4,8 +4,13 @@ import { state } from "./state.js";
 import { parseTypeScript } from "./ts-parser.js";
 import { loadBuildHtml, loadSiteUrl, readSiteCss } from "./preview.js";
 import { updateMockBadge } from "./mocks.js";
-import { extractColors } from "./css-parser.js";
 import { renderColorPanel } from "./color-panel.js";
+import {
+  getCssEditorText,
+  rebuildColorEntries,
+  registerCssSource,
+  resetCssSources,
+} from "./css-sources.js";
 
 let cssEditorEl = null;
 let onBuildLoaded = null;
@@ -77,19 +82,14 @@ async function loadUrl(input, button, statusEl) {
     if (onBuildLoaded) onBuildLoaded("url");
     setUrlStatus(statusEl, "Site loaded. Inspecting CSS…");
 
+    resetCssSources("url");
     cssEditorEl.value = "";
-    state.colorEntries = [];
-    state.replacements.clear();
-    state.alphaOverrides.clear();
     renderColorPanel();
 
-    const { css, skipped } = await readSiteCss();
-    cssEditorEl.value = css;
-    state.colorEntries = extractColors(css);
-    state.replacements.clear();
-    state.alphaOverrides.clear();
+    const { skipped } = await readSiteCss();
+    cssEditorEl.value = getCssEditorText();
     renderColorPanel();
-    if (!css) {
+    if (!state.cssSources.length) {
       setUrlStatus(
         statusEl,
         skipped
@@ -226,47 +226,109 @@ function blobUrlForRef(ref, blobMap, htmlDir) {
   return null;
 }
 
-function rewriteUrlsInCss(css, blobMap) {
-  let result = css.replace(
-    /@import\s+url\(\s*['"]?([^'")]+)['"]?\s*\)/g,
-    (match, ref) => {
-      if (
-        ref.startsWith("data:") ||
-        ref.startsWith("blob:") ||
-        ref.startsWith("http")
-      )
-        return match;
-      const clean = cleanHref(ref);
-      if (blobMap.has(clean)) return "@import url(" + blobMap.get(clean) + ")";
-      return match;
-    },
-  );
+function resolveAssetPath(ref, sourcePath = "") {
+  const clean = cleanHref(ref);
+  if (!clean || /^(?:data|blob|https?):/i.test(clean)) return clean;
+  if (String(ref).trim().startsWith("/")) return normalizeModulePath(clean);
+  const sourceDir = sourcePath.includes("/")
+    ? sourcePath.substring(0, sourcePath.lastIndexOf("/"))
+    : "";
+  return normalizeModulePath(sourceDir + "/" + clean);
+}
 
-  result = result.replace(/@import\s+['"]([^'"]+)['"]/g, (match, ref) => {
+function rewriteUrlsInCss(css, blobMap, sourcePath = "") {
+  return css.replace(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g, (match, ref) => {
     if (
       ref.startsWith("data:") ||
       ref.startsWith("blob:") ||
       ref.startsWith("http")
     )
       return match;
-    const clean = cleanHref(ref);
-    if (blobMap.has(clean)) return "@import url(" + blobMap.get(clean) + ")";
+    const resolved = resolveAssetPath(ref, sourcePath);
+    if (blobMap.has(resolved)) return "url(" + blobMap.get(resolved) + ")";
     return match;
   });
+}
 
-  result = result.replace(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g, (match, ref) => {
-    if (
-      ref.startsWith("data:") ||
-      ref.startsWith("blob:") ||
-      ref.startsWith("http")
-    )
-      return match;
-    const clean = cleanHref(ref);
-    if (blobMap.has(clean)) return "url(" + blobMap.get(clean) + ")";
-    return match;
-  });
+function closingParen(text, openIndex) {
+  let depth = 0;
+  for (let i = openIndex; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
 
-  return result;
+function wrapImportedCss(css, condition) {
+  let rest = condition;
+  let layer = null;
+  let supports = null;
+  const layerMatch = rest.match(/\blayer(?:\(([^)]*)\))?/i);
+  if (layerMatch) {
+    layer = layerMatch[1]?.trim() || "";
+    rest = rest.replace(layerMatch[0], " ");
+  }
+  const supportsMatch = /\bsupports\s*\(/i.exec(rest);
+  if (supportsMatch) {
+    const open = rest.indexOf("(", supportsMatch.index);
+    const close = closingParen(rest, open);
+    if (close >= 0) {
+      supports = rest.substring(open + 1, close).trim();
+      rest = rest.substring(0, supportsMatch.index) + rest.substring(close + 1);
+    }
+  }
+
+  const media = rest.trim();
+  let wrapped = css;
+  if (media) wrapped = `@media ${media}{\n${wrapped}\n}`;
+  if (supports) {
+    const supportsCondition =
+      supports.startsWith("(") || /^(?:selector|font-tech|font-format)\(/i.test(supports)
+        ? supports
+        : `(${supports})`;
+    wrapped = `@supports ${supportsCondition}{\n${wrapped}\n}`;
+  }
+  if (layer !== null) wrapped = `@layer${layer ? ` ${layer}` : ""}{\n${wrapped}\n}`;
+  return wrapped;
+}
+
+async function expandCssImports(
+  css,
+  sourcePath,
+  fileMap,
+  blobMap,
+  visited = new Set(),
+) {
+  if (visited.has(sourcePath)) return "";
+  const nextVisited = new Set(visited);
+  nextVisited.add(sourcePath);
+  const importRe = /@import\s+(?:url\(\s*)?['"]?([^'"\)\s]+)['"]?\s*\)?\s*([^;]*);/gi;
+  let result = "";
+  let cursor = 0;
+  let match;
+
+  while ((match = importRe.exec(css))) {
+    result += css.substring(cursor, match.index);
+    cursor = importRe.lastIndex;
+    const ref = match[1];
+    const resolved = resolveAssetPath(ref, sourcePath);
+    const importedFile = fileMap.get(resolved);
+    if (!importedFile || /^(?:data|blob|https?):/i.test(ref)) {
+      result += match[0];
+      continue;
+    }
+    const imported = await expandCssImports(
+      await importedFile.text(),
+      resolved,
+      fileMap,
+      blobMap,
+      nextVisited,
+    );
+    const condition = match[2].trim();
+    result += condition ? wrapImportedCss(imported, condition) : imported;
+  }
+  result += css.substring(cursor);
+  return rewriteUrlsInCss(result, blobMap, sourcePath);
 }
 
 function normalizeModulePath(path) {
@@ -362,6 +424,7 @@ function buildCaptureScript(mocks) {
 async function loadBuild() {
   state.failedEndpoints.clear();
   updateMockBadge();
+  resetCssSources("build");
 
   const found = findHtmlFile();
   if (!found) {
@@ -375,6 +438,7 @@ async function loadBuild() {
 
   // ---- blob URLs for non-module assets under htmlDir ----
   const blobMap = new Map();
+  const assetFiles = new Map();
   const moduleFiles = new Map();
   for (const [path, file] of state.buildFileMap) {
     if (path === htmlPath) continue;
@@ -388,6 +452,7 @@ async function loadBuild() {
       continue;
     }
 
+    assetFiles.set(relativePath, file);
     const buf = await file.arrayBuffer();
     const blob = new Blob([buf], { type: getMimeType(file.name) });
     blobMap.set(relativePath, URL.createObjectURL(blob));
@@ -443,35 +508,62 @@ async function loadBuild() {
     );
   }
 
-  // ---- inline CSS <link>s with url() rewriting ----
-  let allCss = "";
-  let firstInlinedStyle = null;
-  const inlinedStyleEls = new Set();
-
+  // ---- inline linked stylesheets while preserving each source boundary ----
+  let sourceSequence = 0;
   for (const link of Array.from(
     doc.querySelectorAll('link[rel="stylesheet"]'),
   )) {
     const href = link.getAttribute("href");
     const file = findFileByRelativePath(href, htmlDir);
     if (file) {
-      let content = await file.text();
-      content = rewriteUrlsInCss(content, blobMap);
-      allCss += content + "\n";
+      const sourcePath = Array.from(assetFiles).find(
+        ([, candidate]) => candidate === file,
+      )?.[0] || cleanHref(href);
+      const content = await expandCssImports(
+        await file.text(),
+        sourcePath,
+        assetFiles,
+        blobMap,
+      );
       const style = doc.createElement("style");
+      style.dataset.ctSource = `build-style-${++sourceSequence}`;
+      style.dataset.ctName = sourcePath;
       style.textContent = content;
       link.replaceWith(style);
-      inlinedStyleEls.add(style);
-      if (!firstInlinedStyle) firstInlinedStyle = style;
     }
   }
 
-  // also collect pre-existing <style> content (Angular critical CSS)
+  // Register every style independently, including Angular critical/runtime CSS.
+  let sourceOrder = 0;
   for (const style of Array.from(doc.querySelectorAll("style"))) {
-    if (inlinedStyleEls.has(style)) continue;
     if (style.type === "importmap") continue;
     const rewritten = rewriteUrlsInCss(style.textContent, blobMap);
     if (rewritten !== style.textContent) style.textContent = rewritten;
-    allCss += style.textContent + "\n";
+    if (!style.dataset.ctSource) {
+      style.dataset.ctSource = `build-style-${++sourceSequence}`;
+    }
+    registerCssSource({
+      id: style.dataset.ctSource,
+      name: style.dataset.ctName || style.dataset.ctSource,
+      kind: "build",
+      text: style.textContent,
+      order: sourceOrder++,
+      owner: null,
+    });
+  }
+
+  // Inline style attributes are editable sources too.
+  for (const element of Array.from(doc.querySelectorAll("[style]"))) {
+    const id = `build-attribute-${++sourceSequence}`;
+    element.dataset.ctInlineSource = id;
+    registerCssSource({
+      id,
+      name: `${element.tagName.toLowerCase()}[style]`,
+      kind: "attribute",
+      text: element.getAttribute("style") || "",
+      order: sourceOrder++,
+      owner: null,
+    });
   }
 
   // ---- rewrite icon / preload / resource links ----
@@ -519,39 +611,21 @@ async function loadBuild() {
     }
   }
 
-  // ---- inject capture + listener scripts (after import map, before modules) ----
+  // ---- inject request/error capture (after import map, before modules) ----
   const anchor = doc.head.querySelector('script[type="importmap"]');
 
   const captureEl = doc.createElement("script");
   captureEl.textContent = buildCaptureScript(state.mockData);
 
-  const listenerEl = doc.createElement("script");
-  listenerEl.textContent =
-    'window.addEventListener("message",function(e){' +
-    'if(e.data&&e.data.type==="css-update"){' +
-    'var s=document.getElementById("__ct");if(s)s.textContent=e.data.css;}});';
-
   if (anchor) {
-    anchor.after(listenerEl);
-    listenerEl.after(captureEl);
+    anchor.after(captureEl);
   } else {
     doc.head.insertBefore(captureEl, doc.head.firstChild);
-    doc.head.insertBefore(listenerEl, captureEl);
-  }
-
-  // ---- mark first inlined <style> for CSS patching ----
-  if (firstInlinedStyle) {
-    firstInlinedStyle.id = "__ct";
-  } else {
-    const anyStyle = doc.querySelector("style");
-    if (anyStyle) anyStyle.id = "__ct";
   }
 
   // ---- feed CSS to editor + color parser ----
-  cssEditorEl.value = allCss;
-  state.colorEntries = extractColors(allCss);
-  state.replacements.clear();
-  state.alphaOverrides.clear();
+  rebuildColorEntries();
+  cssEditorEl.value = getCssEditorText();
   renderColorPanel();
 
   loadBuildHtml("<!DOCTYPE html>" + doc.documentElement.outerHTML);

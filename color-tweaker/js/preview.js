@@ -10,7 +10,6 @@ import {
   registerCssSource,
   resetCssSources,
   setEditorCss,
-  updateSourcesFromCombinedCss,
 } from "./css-sources.js";
 
 let iframeEl = null;
@@ -65,14 +64,6 @@ const IFRAME_LISTENER = `
     }
   });
 })();`;
-
-export function parseAndRefresh() {
-  updateSourcesFromCombinedCss(ed.css.value);
-  rebuildColorEntries({ clearReplacements: true });
-  renderColorPanel();
-  if (isLoadedPreviewActive()) patchCss();
-  else updatePreview(ed.html.value, ed.css.value, ed.js.value);
-}
 
 export function initPreview(iframe, callbacks = {}) {
   iframeEl = iframe;

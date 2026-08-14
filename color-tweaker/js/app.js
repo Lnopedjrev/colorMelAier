@@ -6,10 +6,14 @@ import {
   patchCss,
   getProcessedCss,
   setPreviewInspector,
-  parseAndRefresh,
+  isLoadedPreviewActive,
   download,
 } from "./preview.js";
-import { getCssEditorText } from "./css-sources.js";
+import {
+  getCssEditorText,
+  rebuildColorEntries,
+  updateSourcesFromCombinedCss,
+} from "./css-sources.js";
 import {
   setSiteTabsGuarded,
   initColorPanel,
@@ -120,6 +124,14 @@ Object.values(ed).forEach((textarea) => {
     }
   });
 });
+
+function parseAndRefresh() {
+  updateSourcesFromCombinedCss(ed.css.value);
+  rebuildColorEntries({ clearReplacements: true });
+  renderColorPanel();
+  if (isLoadedPreviewActive()) patchCss();
+  else updatePreview(ed.html.value, ed.css.value, ed.js.value);
+}
 
 const debouncedParse = debounce(parseAndRefresh, 300);
 const debouncedPreview = debounce(

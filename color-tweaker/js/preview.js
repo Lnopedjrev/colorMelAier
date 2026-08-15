@@ -537,6 +537,7 @@ function findBySource(doc, attribute, id) {
 }
 
 function applyDirectUpdates(doc, updates) {
+  if (runtimeObserver) runtimeObserver.disconnect();
   applyingUpdates = true;
   try {
     for (const update of updates) {
@@ -573,6 +574,7 @@ function applyDirectUpdates(doc, updates) {
     }
   } finally {
     applyingUpdates = false;
+    observeRuntimeSources(doc);
   }
 }
 

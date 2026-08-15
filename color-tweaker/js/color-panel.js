@@ -3,7 +3,6 @@
 import { state } from "./state.js";
 import {
   hexToRgba,
-  entryHasAlpha,
   getEntryAlpha,
   toCanonical,
 } from "./utils.js";
@@ -85,8 +84,7 @@ export function renderColorPanel() {
             ? "named"
             : "inline";
       const alpha = getEntryAlpha(entry, state.alphaOverrides);
-      const showAlpha = entryHasAlpha(entry);
-      const swatchColor = showAlpha ? hexToRgba(currentHex, alpha) : currentHex;
+      const swatchColor = hexToRgba(currentHex, alpha);
 
       let html = `<div class="color-entry" data-idx="${i}">
       <div class="swatch"><div class="swatch-inner" style="background:${swatchColor}"></div></div>
@@ -103,17 +101,10 @@ export function renderColorPanel() {
       </div>
     </div>`;
 
-      if (showAlpha) {
-        html += `<div class="alpha-row" data-idx="${i}">
+      html += `<div class="alpha-row" data-idx="${i}">
         <label>${Math.round(alpha * 100)}%</label>
         <input type="range" min="0" max="1" step="0.01" value="${alpha}" data-idx="${i}">
       </div>`;
-      } else {
-        html += `<div class="alpha-row" data-idx="${i}">
-        <label>100%</label>
-        <input type="range" min="0" max="1" step="0.01" value="1" data-idx="${i}">
-      </div>`;
-      }
       return html;
     })
     .join("");

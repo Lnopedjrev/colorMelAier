@@ -28,7 +28,6 @@ export function registerCssSource(source) {
     name: source.name || id,
     kind: source.kind || "inline",
     text: source.text || "",
-    originalText: source.originalText ?? source.text ?? "",
     order: source.order ?? state.cssSources.length,
     href: source.href || null,
     owner: source.owner || null,

@@ -106,16 +106,8 @@ export function hexToRgba(hex6, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export function entryHasAlpha(entry) {
-  for (const orig of entry.originals) {
-    if (extractAlpha(orig) !== null) return true;
-  }
-  return false;
-}
-
 export function getEntryAlpha(entry, alphaOverrides) {
-  const key = entry.id || entry.canonical;
-  if (alphaOverrides.has(key)) return alphaOverrides.get(key);
+  if (alphaOverrides.has(entry.id)) return alphaOverrides.get(entry.id);
   for (const orig of entry.originals) {
     const a = extractAlpha(orig);
     if (a !== null) return a;

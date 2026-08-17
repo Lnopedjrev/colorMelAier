@@ -266,8 +266,3 @@ export function buildColorEntries(sources) {
     return b.count - a.count;
   });
 }
-
-// Compatibility helper for callers with one raw stylesheet.
-export function extractColors(css) {
-  return buildColorEntries([{ id: "editor", text: css, occurrences: [] }]);
-}

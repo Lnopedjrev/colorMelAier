@@ -275,17 +275,6 @@
     installObserver(result.watchedRoots);
   }
 
-  function applyLegacyCss(css) {
-    let style = document.getElementById("__ct");
-    if (!style) {
-      style = document.createElement("style");
-      style.id = "__ct";
-      style.dataset.ctManaged = "true";
-      (document.head || document.documentElement).appendChild(style);
-    }
-    style.textContent = css;
-  }
-
   function collectElementColors(element) {
     const computed = window.getComputedStyle(element);
     const colors = new Set();
@@ -343,18 +332,12 @@
           requestId: event.data.requestId,
           protocol: 2,
           sources: result.sources,
-          css: result.sources.map((source) => source.text).join("\n\n"),
           skipped: result.skipped,
         },
         event.origin,
       );
     } else if (event.data.type === "ct-source-update") {
       applySourceUpdates(event.data.updates);
-    } else if (
-      event.data.type === "ct-css-update" &&
-      typeof event.data.css === "string"
-    ) {
-      applyLegacyCss(event.data.css);
     } else if (event.data.type === "ct-inspect-mode") {
       setInspector(Boolean(event.data.active), event.origin);
     }

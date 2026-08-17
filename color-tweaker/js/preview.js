@@ -8,7 +8,6 @@ import {
   processedSourceText,
   rebuildColorEntries,
   registerCssSource,
-  resetCssSources,
   setEditorCss,
 } from "./css-sources.js";
 
@@ -49,19 +48,15 @@ const IFRAME_LISTENER = `
       .find(function(el){return el.getAttribute(attr)===id;});
   }
   window.addEventListener('message',function(e){
-    if(!e.data)return;
-    if(e.data.type==='ct-source-update'){
-      (e.data.updates||[]).forEach(function(update){
-        var el=update.kind==='attribute'
-          ?bySource('data-ct-inline-source',update.id)
-          :bySource('data-ct-source',update.id);
-        if(!el)return;
-        if(update.kind==='attribute')el.setAttribute('style',update.text);
-        else el.textContent=update.text;
-      });
-    }else if(e.data.type==='css-update'){
-      var s=document.getElementById('__ct');if(s)s.textContent=e.data.css;
-    }
+    if(!e.data||e.data.type!=='ct-source-update')return;
+    (e.data.updates||[]).forEach(function(update){
+      var el=update.kind==='attribute'
+        ?bySource('data-ct-inline-source',update.id)
+        :bySource('data-ct-source',update.id);
+      if(!el)return;
+      if(update.kind==='attribute')el.setAttribute('style',update.text);
+      else el.textContent=update.text;
+    });
   });
 })();`;
 
@@ -73,12 +68,12 @@ export function initPreview(iframe, callbacks = {}) {
   window.addEventListener("message", handleBridgeMessage);
 }
 
-export function isSiteUrlActive() {
-  return previewMode === "url";
-}
-
 export function isLoadedPreviewActive() {
   return previewMode === "url" || previewMode === "build";
+}
+
+function getIframeDocument() {
+  return iframeEl?.contentDocument || null;
 }
 
 function handleBridgeMessage(event) {
@@ -87,18 +82,14 @@ function handleBridgeMessage(event) {
   if (event.data.type === "ct-colors-picked") {
     if (onColorsPicked) onColorsPicked(event.data.colors || []);
   } else if (event.data.type === "ct-css-sources-changed") {
-    installRemoteSources(event.data.sources || [], true);
+    installRemoteSources(event.data.sources || []);
   }
 }
 
-function installRemoteSources(sources, preserveReplacements = false) {
-  if (preserveReplacements) {
-    state.cssMode = "url";
-    state.cssSources = [];
-    state.colorEntries = [];
-  } else {
-    resetCssSources("url");
-  }
+function installRemoteSources(sources) {
+  state.cssMode = "url";
+  state.cssSources = [];
+  state.colorEntries = [];
   for (const source of sources) registerCssSource({ ...source, owner: null });
   rebuildColorEntries();
   if (onCssSourcesChanged) onCssSourcesChanged();
@@ -147,21 +138,19 @@ function syncInspector() {
     inspectorDocument = null;
   }
 
-  try {
-    const doc = iframeEl.contentDocument;
-    void iframeEl.contentWindow.location.href;
-    if (!doc) throw new Error();
+  const doc = getIframeDocument();
+  if (doc) {
     inspectorDocument = doc;
     if (inspectorActive) {
       doc.addEventListener("click", handleInspectedClick, true);
       setInspectorCursor(doc, true);
     }
-  } catch (error) {
-    iframeEl.contentWindow.postMessage(
-      { type: "ct-inspect-mode", active: inspectorActive },
-      siteMessageOrigin,
-    );
+    return;
   }
+  iframeEl.contentWindow.postMessage(
+    { type: "ct-inspect-mode", active: inspectorActive },
+    siteMessageOrigin,
+  );
 }
 
 export function setPreviewInspector(active) {
@@ -258,7 +247,6 @@ function scanRoot(root, orderRef, result) {
         existing && state.replacements.size && isAppliedText
           ? existing.text
           : discoveredText,
-      originalText: existing?.originalText ?? discoveredText,
       order: orderRef.value++,
       owner: style,
     });
@@ -288,7 +276,6 @@ function scanRoot(root, orderRef, result) {
         existing && !hrefChanged && (state.replacements.size || link.__ctPatch)
           ? existing.text
           : serialized.text,
-      originalText: existing?.originalText ?? serialized.text,
       order: orderRef.value++,
       href: link.href,
       owner: link,
@@ -312,7 +299,6 @@ function scanRoot(root, orderRef, result) {
         existing && state.replacements.size && isAppliedText
           ? existing.text
           : text,
-      originalText: existing?.originalText ?? text,
       order: orderRef.value++,
       owner: element,
     });
@@ -341,7 +327,6 @@ function scanRoot(root, orderRef, result) {
           existing && state.replacements.size && isAppliedText
             ? existing.text
             : serialized.text,
-        originalText: existing?.originalText ?? serialized.text,
         order: orderRef.value++,
         owner: sheet,
       });
@@ -353,8 +338,7 @@ function scanRoot(root, orderRef, result) {
   }
 }
 
-function scanDocumentSources(doc, { reset = false, notify = true } = {}) {
-  if (reset) resetCssSources(previewMode);
+function scanDocumentSources(doc, { notify = true } = {}) {
   const result = { skipped: 0, seen: new Set() };
   scanRoot(doc, { value: 0 }, result);
   state.cssSources = state.cssSources.filter((source) =>
@@ -369,11 +353,8 @@ function scheduleRuntimeScan() {
   if (applyingUpdates) return;
   window.clearTimeout(scanTimer);
   scanTimer = window.setTimeout(() => {
-    try {
-      scanDocumentSources(iframeEl.contentDocument);
-    } catch (error) {
-      // Cross-origin pages notify through the bridge.
-    }
+    const doc = getIframeDocument();
+    if (doc) scanDocumentSources(doc);
   }, 120);
 }
 
@@ -390,15 +371,13 @@ function observeRuntimeSources(doc) {
 
 function handleIframeLoad() {
   syncInspector();
-  try {
-    const doc = iframeEl.contentDocument;
-    void iframeEl.contentWindow.location.href;
-    if (!doc) return;
-    if (previewMode !== "url") scanDocumentSources(doc, { notify: true });
-    observeRuntimeSources(doc);
-  } catch (error) {
+  const doc = getIframeDocument();
+  if (!doc) {
     if (runtimeObserver) runtimeObserver.disconnect();
+    return;
   }
+  if (previewMode !== "url") scanDocumentSources(doc, { notify: true });
+  observeRuntimeSources(doc);
 }
 
 function navigateIframe(html, mode = "editor") {
@@ -460,20 +439,12 @@ function requestSiteCss() {
       if (event.source !== iframeEl.contentWindow) return;
       if (!event.data || event.data.type !== "ct-css-response") return;
       if (event.data.requestId !== requestId) return;
+      if (event.data.protocol !== 2 || !Array.isArray(event.data.sources)) return;
       cleanup();
       siteMessageOrigin = event.origin;
-      const sources = event.data.sources || [
-        {
-          id: "remote",
-          name: "Remote CSS",
-          kind: "remote",
-          text: event.data.css || "",
-        },
-      ];
+      const sources = event.data.sources;
       installRemoteSources(sources);
       resolve({
-        sources,
-        css: getCombinedCss(),
         skipped: Number(event.data.skipped) || 0,
       });
     };
@@ -486,20 +457,12 @@ function requestSiteCss() {
 }
 
 export async function readSiteCss() {
-  try {
-    const doc = iframeEl.contentDocument;
-    void iframeEl.contentWindow.location.href;
-    if (!doc) throw new Error();
-    const result = scanDocumentSources(doc, { reset: true, notify: false });
-    observeRuntimeSources(doc);
-    return {
-      sources: state.cssSources,
-      css: getCombinedCss(),
-      skipped: result.skipped,
-    };
-  } catch (error) {
-    return requestSiteCss();
-  }
+  const doc = getIframeDocument();
+  if (!doc) return requestSiteCss();
+
+  const result = scanDocumentSources(doc, { notify: false });
+  observeRuntimeSources(doc);
+  return { skipped: result.skipped };
 }
 
 export function getProcessedCss(rawCss = "") {
@@ -581,17 +544,15 @@ function applyDirectUpdates(doc, updates) {
 export function patchCss() {
   if (!iframeEl?.contentWindow) return;
   const updates = getCssSourceUpdates();
-  try {
-    const doc = iframeEl.contentDocument;
-    void iframeEl.contentWindow.location.href;
-    if (!doc) throw new Error();
+  const doc = getIframeDocument();
+  if (doc) {
     applyDirectUpdates(doc, updates);
-  } catch (error) {
-    iframeEl.contentWindow.postMessage(
-      { protocol: 2, type: "ct-source-update", updates },
-      siteMessageOrigin,
-    );
+    return;
   }
+  iframeEl.contentWindow.postMessage(
+    { protocol: 2, type: "ct-source-update", updates },
+    siteMessageOrigin,
+  );
 }
 
 export function loadBuildHtml(html) {

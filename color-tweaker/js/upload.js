@@ -1,9 +1,7 @@
-// Build upload — reads dist/ folder, inlines assets, injects capture script into iframe
+// Build upload — reads a dist/ folder, rewrites its assets, and loads it into the iframe
 
 import { state } from "./state.js";
-import { parseTypeScript } from "./ts-parser.js";
 import { loadBuildHtml, loadSiteUrl, readSiteCss } from "./preview.js";
-import { updateMockBadge } from "./mocks.js";
 import { renderColorPanel } from "./color-panel.js";
 import {
   getCssEditorText,
@@ -22,10 +20,8 @@ export function initUpload(elements, callbacks) {
   const {
     dropZone,
     fileInput,
-    tsInput,
     btnLoad,
     buildChips,
-    tsChips,
     siteUrl,
     btnLoadUrl,
     urlStatus,
@@ -46,9 +42,6 @@ export function initUpload(elements, callbacks) {
   });
   fileInput.addEventListener("change", (e) =>
     handleBuildFiles(e.target.files, btnLoad, buildChips),
-  );
-  tsInput.addEventListener("change", (e) =>
-    handleTsFiles(e.target.files, tsChips),
   );
   btnLoad.addEventListener("click", () => loadBuild());
   btnLoadUrl.addEventListener("click", () =>
@@ -129,21 +122,6 @@ async function handleBuildFiles(fileList, btnLoad, chipsEl) {
       ? `<span class="file-chip">+${state.buildFileMap.size - 30} more</span>`
       : "");
   btnLoad.disabled = false;
-}
-
-async function handleTsFiles(fileList, chipsEl) {
-  state.parsedTsTypes = {};
-  chipsEl.innerHTML = "";
-  const chips = [];
-  for (const f of fileList) {
-    const text = await f.text();
-    const types = parseTypeScript(text);
-    Object.assign(state.parsedTsTypes, types);
-    chips.push(
-      `<span class="file-chip ts">${f.name} (${Object.keys(types).length} types)</span>`,
-    );
-  }
-  chipsEl.innerHTML = chips.join("");
 }
 
 function getMimeType(filename) {
@@ -390,40 +368,7 @@ function rewriteModuleSpecifiers(source, importerPath, modulePaths) {
   return result;
 }
 
-function buildCaptureScript(mocks) {
-  var s = "(function(){";
-  s += "var __MOCKS__=" + JSON.stringify(mocks) + ";";
-  s += "var _f=window.fetch;";
-  s += "window.fetch=function(input,init){";
-  s +=
-    'var url=typeof input==="string"?input:(input&&input.url)||String(input);';
-  s += 'var method=((init&&init.method)||"GET").toUpperCase();';
-  s += 'var key=method+" "+url;';
-  s += "if(__MOCKS__[key]!==undefined){";
-  s += "return Promise.resolve(new Response(JSON.stringify(__MOCKS__[key]),";
-  s += '{status:200,headers:{"Content-Type":"application/json"}}));}';
-  s += "return _f.call(window,input,init).then(function(res){";
-  s +=
-    'if(!res.ok){window.parent.postMessage({type:"ct-fetch-fail",url:url,method:method,status:res.status},"*");}';
-  s += "return res;";
-  s += "}).catch(function(err){";
-  s +=
-    'window.parent.postMessage({type:"ct-fetch-fail",url:url,method:method,error:err.message},"*");';
-  s +=
-    'return new Response("null",{status:0,headers:{"Content-Type":"application/json"}});});};';
-  s += 'window.addEventListener("error",function(e){';
-  s +=
-    'window.parent.postMessage({type:"ct-runtime-error",message:e.message,filename:e.filename,lineno:e.lineno},"*");});';
-  s += 'window.addEventListener("unhandledrejection",function(e){';
-  s +=
-    'window.parent.postMessage({type:"ct-unhandled-rejection",reason:String(e.reason)},"*");});';
-  s += "})();";
-  return s;
-}
-
 async function loadBuild() {
-  state.failedEndpoints.clear();
-  updateMockBadge();
   resetCssSources("build");
 
   const found = findHtmlFile();
@@ -609,18 +554,6 @@ async function loadBuild() {
         script.setAttribute("src", blobUrl);
       }
     }
-  }
-
-  // ---- inject request/error capture (after import map, before modules) ----
-  const anchor = doc.head.querySelector('script[type="importmap"]');
-
-  const captureEl = doc.createElement("script");
-  captureEl.textContent = buildCaptureScript(state.mockData);
-
-  if (anchor) {
-    anchor.after(captureEl);
-  } else {
-    doc.head.insertBefore(captureEl, doc.head.firstChild);
   }
 
   // ---- feed CSS to editor + color parser ----

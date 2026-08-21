@@ -64,7 +64,7 @@ main{display:flex;flex:1;min-height:0}
 }
 .editor-wrap textarea.hidden{display:none}
 
-/* --- Panels (upload, mocks) --- */
+/* --- Panels --- */
 .panel{position:absolute;inset:0;overflow-y:auto;padding:12px;background:var(--bg)}
 .panel.hidden{display:none}
 
@@ -199,20 +199,11 @@ main{display:flex;flex:1;min-height:0}
 .drop-zone p{font-size:12px;color:var(--text-muted)}
 .drop-zone code{color:var(--accent);font-family:var(--mono)}
 
-.upload-section{margin-top:12px}
-.upload-section label{
-  display:block;font-size:11px;font-weight:600;color:var(--text-muted);
-  text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;
-}
-.upload-section input[type="file"]{font-size:12px;color:var(--text-muted)}
-
 .file-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
 .file-chip{
   font-size:10px;padding:2px 8px;border-radius:4px;
   background:var(--surface-2);color:var(--text-muted);border:1px solid var(--border);
 }
-.file-chip.ts{color:var(--accent);border-color:var(--accent)}
-
 .btn-load{
   margin-top:12px;width:100%;padding:8px;border-radius:6px;border:1px solid var(--accent);
   background:transparent;color:var(--accent);font-size:12px;font-weight:500;
@@ -220,39 +211,6 @@ main{display:flex;flex:1;min-height:0}
 }
 .btn-load:hover{background:var(--accent);color:var(--bg)}
 .btn-load:disabled{opacity:.4;cursor:default;background:transparent;color:var(--accent)}
-
-/* --- Mocks Panel --- */
-.mock-endpoint{
-  margin-bottom:10px;border:1px solid var(--border);border-radius:6px;
-  background:var(--surface);overflow:hidden;
-}
-.mock-head{
-  display:flex;align-items:center;gap:6px;padding:6px 10px;
-  background:var(--surface-2);font-size:12px;
-}
-.mock-method{font-weight:700;color:var(--accent);font-family:var(--mono)}
-.mock-url{color:var(--text);font-family:var(--mono);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mock-status{font-size:10px;padding:1px 6px;border-radius:3px;background:#da363340;color:#f85149}
-.mock-status.ok{background:#23863640;color:var(--green)}
-.type-select{
-  font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);
-  background:var(--bg);color:var(--text);font-family:var(--sans);cursor:pointer;
-}
-.mock-body textarea{
-  width:100%;min-height:60px;border:none;padding:8px 10px;
-  background:var(--bg);color:var(--text);font-family:var(--mono);
-  font-size:12px;line-height:1.5;resize:vertical;outline:none;
-}
-.btn-apply-mocks{
-  margin-top:8px;width:100%;padding:8px;border-radius:6px;border:1px solid var(--green);
-  background:transparent;color:var(--green);font-size:12px;font-weight:500;
-  cursor:pointer;font-family:var(--sans);transition:all .15s;
-}
-.btn-apply-mocks:hover{background:var(--green);color:var(--bg)}
-.mock-count-badge{
-  font-size:10px;padding:1px 5px;border-radius:8px;
-  background:#da363340;color:#f85149;margin-left:4px;
-}
 
 /* --- Scrollbar --- */
 ::-webkit-scrollbar{width:8px}

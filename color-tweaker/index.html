@@ -22,7 +22,6 @@
         <button class="tab" data-tab="css">CSS</button>
         <button class="tab" data-tab="js">JS</button>
         <button class="tab" data-tab="upload">Upload</button>
-        <button class="tab" data-tab="mocks">Mocks<span id="mock-badge"></span></button>
       </div>
       <div class="editor-wrap">
         <textarea id="ed-html" spellcheck="false"></textarea>
@@ -44,17 +43,7 @@
             <input type="file" id="file-input" webkitdirectory multiple hidden>
           </div>
           <div class="file-chips" id="build-files"></div>
-          <div class="upload-section">
-            <label>TypeScript types (optional)</label>
-            <input type="file" id="ts-input" accept=".ts,.d.ts" multiple>
-          </div>
-          <div class="file-chips" id="ts-files"></div>
           <button class="btn-load" id="btn-load" disabled>Load Build</button>
-        </div>
-
-        <div id="panel-mocks" class="panel hidden">
-          <div id="mocks-list"><div class="empty">No failed requests captured yet</div></div>
-          <button class="btn-apply-mocks hidden" id="btn-apply-mocks">Apply Mocks &amp; Reload</button>
         </div>
       </div>
       <div class="color-panel">

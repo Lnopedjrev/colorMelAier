@@ -20,8 +20,7 @@ import {
   renderColorPanel,
   highlightColorEntries,
 } from "./color-panel.js";
-import { initMocks, updateMockBadge, renderMocksPanel } from "./mocks.js";
-import { initUpload, loadBuild } from "./upload.js";
+import { initUpload } from "./upload.js";
 
 // ---- DOM References ----
 const ed = {
@@ -33,7 +32,6 @@ const preview = document.getElementById("preview");
 const tabs = document.getElementById("tabs");
 const btnInspectColor = document.getElementById("btn-inspect-color");
 const panelUpload = document.getElementById("panel-upload");
-const panelMocks = document.getElementById("panel-mocks");
 
 // ---- Initialize Modules ----
 initPreview(preview, {
@@ -49,21 +47,12 @@ initColorPanel(
   document.getElementById("cp-count"),
 );
 
-initMocks(
-  document.getElementById("mocks-list"),
-  document.getElementById("btn-apply-mocks"),
-  document.getElementById("mock-badge"),
-  () => loadBuild(),
-);
-
 initUpload(
   {
     dropZone: document.getElementById("drop-zone"),
     fileInput: document.getElementById("file-input"),
-    tsInput: document.getElementById("ts-input"),
     btnLoad: document.getElementById("btn-load"),
     buildChips: document.getElementById("build-files"),
-    tsChips: document.getElementById("ts-files"),
     cssEditor: ed.css,
     siteUrl: document.getElementById("site-url"),
     btnLoadUrl: document.getElementById("btn-load-url"),
@@ -71,7 +60,6 @@ initUpload(
   },
   {
     onBuildLoaded: (source) => {
-      renderMocksPanel();
       setSiteTabsGuarded(source === "url" || source === "build");
     },
   },
@@ -104,10 +92,8 @@ tabs.addEventListener("click", (e) => {
   tab.classList.add("active");
   Object.keys(ed).forEach((k) => ed[k].classList.add("hidden"));
   panelUpload.classList.add("hidden");
-  panelMocks.classList.add("hidden");
   if (ed[key]) ed[key].classList.remove("hidden");
   else if (key === "upload") panelUpload.classList.remove("hidden");
-  else if (key === "mocks") panelMocks.classList.remove("hidden");
 });
 
 // ---- Tab Key Support ----

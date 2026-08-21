@@ -6,7 +6,4 @@ export const state = {
   replacements: new Map(),
   alphaOverrides: new Map(),
   buildFileMap: new Map(),
-  parsedTsTypes: {},
-  failedEndpoints: new Map(),
-  mockData: {}
 };

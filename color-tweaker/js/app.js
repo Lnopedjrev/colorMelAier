@@ -36,9 +36,11 @@ const panelUpload = document.getElementById("panel-upload");
 // ---- Initialize Modules ----
 initPreview(preview, {
   onColorsPicked: (colors) => highlightColorEntries(colors),
-  onCssSourcesChanged: () => {
-    ed.css.value = getCssEditorText();
-    renderColorPanel();
+  onCssSourcesChanged: ({ colorsChanged = true } = {}) => {
+    if (colorsChanged || !ed.css.classList.contains("hidden")) {
+      ed.css.value = getCssEditorText();
+    }
+    if (colorsChanged) renderColorPanel();
   },
 });
 
@@ -92,6 +94,9 @@ tabs.addEventListener("click", (e) => {
   tab.classList.add("active");
   Object.keys(ed).forEach((k) => ed[k].classList.add("hidden"));
   panelUpload.classList.add("hidden");
+  if (key === "css" && isLoadedPreviewActive()) {
+    ed.css.value = getCssEditorText();
+  }
   if (ed[key]) ed[key].classList.remove("hidden");
   else if (key === "upload") panelUpload.classList.remove("hidden");
 });

@@ -227,10 +227,19 @@ export function parseCssSource(css, sourceId = "editor") {
     .filter((occurrence) => occurrence.canonical);
 }
 
-export function buildColorEntries(sources) {
+export function buildColorEntries(
+  sources,
+  { reparse = true, sourceIds = null } = {},
+) {
   const found = new Map();
   for (const source of sources) {
-    source.occurrences = parseCssSource(source.text, source.id);
+    if (
+      reparse ||
+      !Array.isArray(source.occurrences) ||
+      sourceIds?.has(source.id)
+    ) {
+      source.occurrences = parseCssSource(source.text, source.id);
+    }
     for (const occurrence of source.occurrences) {
       const key = occurrence.variableName
         ? `variable:${occurrence.variableName}:${occurrence.canonical}`

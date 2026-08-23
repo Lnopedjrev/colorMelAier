@@ -8,6 +8,7 @@
   const script = document.currentScript;
   const allowedOrigin = script && script.dataset.colorTweakerOrigin;
   const sourceOwners = new Map();
+  const sourceRecords = new Map();
   const sourceTexts = new Map();
   const lastAppliedTexts = new Map();
   const overriddenIds = new Set();
@@ -17,6 +18,10 @@
   let inspectorOrigin = null;
   let observer = null;
   let notifyTimer = null;
+  let observedRoots = [];
+  let pendingFullScan = false;
+  const pendingStyleSources = new Set();
+  const pendingInlineSources = new Set();
 
   const inspectedColorProperties = [
     "color",
@@ -92,6 +97,7 @@
 
   function scanSources() {
     sourceOwners.clear();
+    sourceRecords.clear();
     const sources = [];
     const watchedRoots = [];
     let order = 0;
@@ -109,7 +115,9 @@
         overriddenIds.delete(source.id);
         lastAppliedTexts.delete(source.id);
       }
-      sources.push({ ...source, order: order++ });
+      const record = { ...source, order: order++ };
+      sources.push(record);
+      sourceRecords.set(source.id, record);
       sourceOwners.set(source.id, { kind: source.kind, owner });
     }
 
@@ -204,12 +212,207 @@
     return { sources, skipped, watchedRoots };
   }
 
+  function isTrackableStyle(element) {
+    return (
+      element &&
+      element.nodeType === 1 &&
+      element.tagName === "STYLE" &&
+      element.id !== "__ct-inspector" &&
+      element.type !== "importmap" &&
+      element.dataset.ctManaged !== "true"
+    );
+  }
+
+  function isStylesheetLink(element) {
+    return (
+      element &&
+      element.nodeType === 1 &&
+      element.tagName === "LINK" &&
+      element.relList &&
+      element.relList.contains("stylesheet")
+    );
+  }
+
+  function subtreeContainsCssSource(node) {
+    if (!node || node.nodeType !== 1) return false;
+    if (
+      isTrackableStyle(node) ||
+      isStylesheetLink(node) ||
+      (node.hasAttribute("style") && node.id !== "__ct-inspector") ||
+      node.shadowRoot
+    ) {
+      return true;
+    }
+    if (
+      Array.from(node.querySelectorAll("style")).some(isTrackableStyle) ||
+      node.querySelector('link[rel~="stylesheet"], [style]')
+    ) {
+      return true;
+    }
+    return Array.from(node.querySelectorAll("*")).some(function (element) {
+      return element.shadowRoot;
+    });
+  }
+
+  function queueMutations(records) {
+    for (const record of records) {
+      if (record.type === "attributes") {
+        if (record.attributeName === "href" && isStylesheetLink(record.target)) {
+          pendingFullScan = true;
+        } else if (
+          record.attributeName === "style" &&
+          record.target.id !== "__ct-inspector"
+        ) {
+          const id = record.target.getAttribute("data-ct-inline-source");
+          if (id && sourceOwners.get(id)?.owner === record.target) {
+            pendingInlineSources.add(record.target);
+          } else {
+            pendingFullScan = true;
+          }
+        }
+        continue;
+      }
+      if (record.type !== "childList") continue;
+      if (isTrackableStyle(record.target)) {
+        pendingStyleSources.add(record.target);
+        continue;
+      }
+      if (
+        Array.from(record.addedNodes)
+          .concat(Array.from(record.removedNodes))
+          .some(subtreeContainsCssSource)
+      ) {
+        pendingFullScan = true;
+      }
+    }
+    if (
+      !pendingFullScan &&
+      !pendingStyleSources.size &&
+      !pendingInlineSources.size
+    ) {
+      return;
+    }
+    window.clearTimeout(notifyTimer);
+    notifyTimer = window.setTimeout(flushMutations, 300);
+  }
+
+  function updateSourceRecord(source, owner) {
+    const current = sourceRecords.get(source.id);
+    if (
+      overriddenIds.has(source.id) &&
+      sourceTexts.has(source.id) &&
+      lastAppliedTexts.get(source.id) === source.text
+    ) {
+      source.text = sourceTexts.get(source.id);
+    } else {
+      sourceTexts.set(source.id, source.text);
+      overriddenIds.delete(source.id);
+      lastAppliedTexts.delete(source.id);
+    }
+    const next = { ...source, order: current?.order ?? sourceRecords.size };
+    if (
+      current &&
+      current.text === next.text &&
+      current.name === next.name &&
+      current.kind === next.kind &&
+      (current.href || null) === (next.href || null)
+    ) {
+      return null;
+    }
+    sourceRecords.set(next.id, next);
+    sourceOwners.set(next.id, { kind: next.kind, owner });
+    return next;
+  }
+
+  function updateStyleSource(style) {
+    const id = style.getAttribute("data-ct-source");
+    if (!id || !sourceOwners.has(id) || !style.isConnected) {
+      return { fullScan: true };
+    }
+    const serialized = /@import\b/i.test(style.textContent || "")
+      ? serializeSheet(style.sheet, new Set())
+      : null;
+    return {
+      source: updateSourceRecord(
+        {
+          id,
+          name: style.dataset.ctName || id,
+          kind: sourceRecords.get(id)?.kind || "runtime",
+          text: (serialized && serialized.text) || style.textContent || "",
+        },
+        style,
+      ),
+    };
+  }
+
+  function updateInlineSource(element) {
+    const id = element.getAttribute("data-ct-inline-source");
+    if (!id || sourceOwners.get(id)?.owner !== element) {
+      return { fullScan: true };
+    }
+    if (!element.isConnected || !element.hasAttribute("style")) {
+      sourceOwners.delete(id);
+      sourceRecords.delete(id);
+      sourceTexts.delete(id);
+      lastAppliedTexts.delete(id);
+      overriddenIds.delete(id);
+      return { removedId: id };
+    }
+    return {
+      source: updateSourceRecord(
+        {
+          id,
+          name: element.tagName.toLowerCase() + "[style]",
+          kind: "attribute",
+          text: element.getAttribute("style") || "",
+        },
+        element,
+      ),
+    };
+  }
+
+  function flushMutations() {
+    notifyTimer = null;
+    const fullScan = pendingFullScan;
+    const styles = Array.from(pendingStyleSources);
+    const inlineElements = Array.from(pendingInlineSources);
+    pendingFullScan = false;
+    pendingStyleSources.clear();
+    pendingInlineSources.clear();
+    if (fullScan) {
+      notifySourcesChanged();
+      return;
+    }
+    const sources = [];
+    const removedIds = [];
+    for (const style of styles) {
+      const change = updateStyleSource(style);
+      if (change.fullScan) {
+        notifySourcesChanged();
+        return;
+      }
+      if (change.source) sources.push(change.source);
+    }
+    for (const element of inlineElements) {
+      const change = updateInlineSource(element);
+      if (change.fullScan) {
+        notifySourcesChanged();
+        return;
+      }
+      if (change.source) sources.push(change.source);
+      if (change.removedId) removedIds.push(change.removedId);
+    }
+    if (!sources.length && !removedIds.length) return;
+    window.parent.postMessage(
+      { type: "ct-css-source-changes", sources, removedIds },
+      parentOrigin,
+    );
+  }
+
   function installObserver(roots) {
     if (observer) observer.disconnect();
-    observer = new MutationObserver(() => {
-      window.clearTimeout(notifyTimer);
-      notifyTimer = window.setTimeout(notifySourcesChanged, 120);
-    });
+    observedRoots = roots;
+    observer = new MutationObserver(queueMutations);
     for (const root of roots) {
       const target = root === document ? document.documentElement : root;
       if (!target) continue;
@@ -245,6 +448,10 @@
       if (typeof update.sourceText === "string") {
         sourceTexts.set(update.id, update.sourceText);
       }
+      const currentText = lastAppliedTexts.has(update.id)
+        ? lastAppliedTexts.get(update.id)
+        : sourceTexts.get(update.id);
+      if (currentText === update.text) continue;
       overriddenIds.add(update.id);
       if (record.kind === "attribute") {
         record.owner.setAttribute("style", update.text);
@@ -271,8 +478,7 @@
         lastAppliedTexts.set(update.id, record.owner.textContent || "");
       }
     }
-    const result = scanSources();
-    installObserver(result.watchedRoots);
+    installObserver(observedRoots);
   }
 
   function collectElementColors(element) {

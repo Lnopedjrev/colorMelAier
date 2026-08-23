@@ -7,6 +7,7 @@ import {
   getFlattenedCss,
   processedSourceText,
   rebuildColorEntries,
+  rebuildChangedColorEntries,
   registerCssSource,
   setEditorCss,
 } from "./css-sources.js";
@@ -23,8 +24,12 @@ let onCssSourcesChanged = null;
 let runtimeObserver = null;
 let scanTimer = null;
 let applyingUpdates = false;
+let pendingFullScan = false;
+const pendingStyleSources = new Set();
+const pendingInlineSources = new Set();
 let runtimeSequence = 0;
 const sheetIds = new WeakMap();
+const remoteAppliedTexts = new Map();
 
 const INSPECTED_COLOR_PROPERTIES = [
   "color",
@@ -83,6 +88,11 @@ function handleBridgeMessage(event) {
     if (onColorsPicked) onColorsPicked(event.data.colors || []);
   } else if (event.data.type === "ct-css-sources-changed") {
     installRemoteSources(event.data.sources || []);
+  } else if (event.data.type === "ct-css-source-changes") {
+    applyRemoteSourceChanges(
+      event.data.sources || [],
+      event.data.removedIds || [],
+    );
   }
 }
 
@@ -90,9 +100,55 @@ function installRemoteSources(sources) {
   state.cssMode = "url";
   state.cssSources = [];
   state.colorEntries = [];
-  for (const source of sources) registerCssSource({ ...source, owner: null });
+  remoteAppliedTexts.clear();
+  for (const source of sources) {
+    registerCssSource({ ...source, owner: null });
+    remoteAppliedTexts.set(source.id, source.text || "");
+  }
   rebuildColorEntries();
   if (onCssSourcesChanged) onCssSourcesChanged();
+}
+
+function colorEntriesSignature(entries = state.colorEntries) {
+  return entries
+    .map(
+      (entry) =>
+        `${entry.id}|${entry.type}|${entry.count}|${Array.from(entry.originals).sort().join(",")}|${Array.from(entry.sourceIds).sort().join(",")}`,
+    )
+    .join("\n");
+}
+
+function applyRemoteSourceChanges(sources, removedIds) {
+  const changedIds = new Set();
+  for (const id of removedIds) {
+    const index = state.cssSources.findIndex((source) => source.id === id);
+    if (index < 0) continue;
+    state.cssSources.splice(index, 1);
+    remoteAppliedTexts.delete(id);
+    changedIds.add(id);
+  }
+  for (const source of sources) {
+    const existing = state.cssSources.find((item) => item.id === source.id);
+    if (
+      existing &&
+      existing.text === source.text &&
+      existing.name === (source.name || source.id) &&
+      existing.kind === (source.kind || "inline") &&
+      existing.href === (source.href || null) &&
+      existing.order === (source.order ?? existing.order)
+    ) {
+      continue;
+    }
+    registerCssSource({ ...source, owner: null });
+    remoteAppliedTexts.set(source.id, source.text || "");
+    changedIds.add(source.id);
+  }
+  if (!changedIds.size) return;
+  const before = colorEntriesSignature();
+  rebuildChangedColorEntries(changedIds);
+  if (onCssSourcesChanged) {
+    onCssSourcesChanged({ colorsChanged: before !== colorEntriesSignature() });
+  }
 }
 
 function collectElementColors(element) {
@@ -349,13 +405,174 @@ function scanDocumentSources(doc, { notify = true } = {}) {
   return result;
 }
 
-function scheduleRuntimeScan() {
+function isTrackableStyle(element) {
+  return (
+    element?.nodeType === 1 &&
+    element.tagName === "STYLE" &&
+    element.id !== "__ct-inspector" &&
+    element.type !== "importmap" &&
+    element.dataset.ctManaged !== "true"
+  );
+}
+
+function isStylesheetLink(element) {
+  return (
+    element?.nodeType === 1 &&
+    element.tagName === "LINK" &&
+    element.relList?.contains("stylesheet")
+  );
+}
+
+function subtreeContainsCssSource(node) {
+  if (node?.nodeType !== 1) return false;
+  if (
+    isTrackableStyle(node) ||
+    isStylesheetLink(node) ||
+    (node.hasAttribute("style") && node.id !== "__ct-inspector") ||
+    node.shadowRoot
+  ) {
+    return true;
+  }
+  if (
+    Array.from(node.querySelectorAll("style")).some(isTrackableStyle) ||
+    node.querySelector('link[rel~="stylesheet"], [style]')
+  ) {
+    return true;
+  }
+  return Array.from(node.querySelectorAll("*")).some(
+    (element) => element.shadowRoot,
+  );
+}
+
+function scheduleRuntimeScan(records) {
   if (applyingUpdates) return;
+  if (!Array.isArray(records)) {
+    pendingFullScan = true;
+  } else {
+    for (const record of records) {
+      if (record.type === "attributes") {
+        if (record.attributeName === "href" && isStylesheetLink(record.target)) {
+          pendingFullScan = true;
+        } else if (
+          record.attributeName === "style" &&
+          record.target.id !== "__ct-inspector"
+        ) {
+          pendingInlineSources.add(record.target);
+        }
+        continue;
+      }
+      if (record.type !== "childList") continue;
+      if (isTrackableStyle(record.target)) {
+        pendingStyleSources.add(record.target);
+        continue;
+      }
+      if (
+        [...record.addedNodes, ...record.removedNodes].some(
+          subtreeContainsCssSource,
+        )
+      ) {
+        pendingFullScan = true;
+      }
+    }
+  }
+  if (
+    !pendingFullScan &&
+    !pendingStyleSources.size &&
+    !pendingInlineSources.size
+  ) {
+    return;
+  }
   window.clearTimeout(scanTimer);
-  scanTimer = window.setTimeout(() => {
-    const doc = getIframeDocument();
-    if (doc) scanDocumentSources(doc);
-  }, 120);
+  scanTimer = window.setTimeout(flushRuntimeMutations, 300);
+}
+
+function updateRuntimeStyleSource(style) {
+  if (!style.isConnected || !isTrackableStyle(style)) return null;
+  const id = ensureNodeSourceId(style, "style");
+  const existing = state.cssSources.find((source) => source.id === id);
+  const serialized = /@import\b/i.test(style.textContent)
+    ? serializeStyleSheet(style.sheet)
+    : null;
+  const text = serialized?.text || style.textContent;
+  if (
+    existing &&
+    (existing.text === text || existing.lastAppliedText === text)
+  ) {
+    return null;
+  }
+  if (existing) delete existing.lastAppliedText;
+  registerCssSource({
+    id,
+    name: style.dataset.ctName || id,
+    kind: existing?.kind || "runtime",
+    text,
+    order: existing?.order ?? state.cssSources.length,
+    owner: style,
+  });
+  return id;
+}
+
+function updateRuntimeInlineSource(element) {
+  const id = element.getAttribute("data-ct-inline-source");
+  const existing =
+    state.cssSources.find((source) => source.owner === element) ||
+    state.cssSources.find((source) => source.id === id);
+  if (!element.isConnected || !element.hasAttribute("style")) {
+    if (!existing) return null;
+    state.cssSources = state.cssSources.filter(
+      (source) => source !== existing,
+    );
+    return existing.id;
+  }
+  const sourceId = ensureNodeSourceId(element, "attribute");
+  const text = element.getAttribute("style") || "";
+  if (
+    existing &&
+    (existing.text === text || existing.lastAppliedText === text)
+  ) {
+    return null;
+  }
+  if (existing) delete existing.lastAppliedText;
+  registerCssSource({
+    id: sourceId,
+    name: `${element.tagName.toLowerCase()}[style]`,
+    kind: "attribute",
+    text,
+    order: existing?.order ?? state.cssSources.length,
+    owner: element,
+  });
+  return sourceId;
+}
+
+function flushRuntimeMutations() {
+  scanTimer = null;
+  const doc = getIframeDocument();
+  const fullScan = pendingFullScan;
+  const styles = Array.from(pendingStyleSources);
+  const inlineElements = Array.from(pendingInlineSources);
+  pendingFullScan = false;
+  pendingStyleSources.clear();
+  pendingInlineSources.clear();
+  if (!doc) return;
+  if (fullScan) {
+    scanDocumentSources(doc);
+    return;
+  }
+  const changedIds = new Set();
+  for (const style of styles) {
+    const id = updateRuntimeStyleSource(style);
+    if (id) changedIds.add(id);
+  }
+  for (const element of inlineElements) {
+    const id = updateRuntimeInlineSource(element);
+    if (id) changedIds.add(id);
+  }
+  if (!changedIds.size) return;
+  const before = colorEntriesSignature();
+  rebuildChangedColorEntries(changedIds);
+  if (onCssSourcesChanged) {
+    onCssSourcesChanged({ colorsChanged: before !== colorEntriesSignature() });
+  }
 }
 
 function observeRuntimeSources(doc) {
@@ -506,6 +723,7 @@ function applyDirectUpdates(doc, updates) {
     for (const update of updates) {
       const source = state.cssSources.find((item) => item.id === update.id);
       if (!source) continue;
+      if (update.text === (source.lastAppliedText ?? source.text)) continue;
       if (source.kind === "attribute") {
         const element =
           source.owner || findBySource(doc, "data-ct-inline-source", update.id);
@@ -549,8 +767,15 @@ export function patchCss() {
     applyDirectUpdates(doc, updates);
     return;
   }
+  const changedUpdates = updates.filter(
+    (update) => remoteAppliedTexts.get(update.id) !== update.text,
+  );
+  if (!changedUpdates.length) return;
+  for (const update of changedUpdates) {
+    remoteAppliedTexts.set(update.id, update.text);
+  }
   iframeEl.contentWindow.postMessage(
-    { protocol: 2, type: "ct-source-update", updates },
+    { protocol: 2, type: "ct-source-update", updates: changedUpdates },
     siteMessageOrigin,
   );
 }

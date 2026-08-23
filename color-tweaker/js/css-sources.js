@@ -49,6 +49,14 @@ export function rebuildColorEntries({ clearReplacements = false } = {}) {
   return state.colorEntries;
 }
 
+export function rebuildChangedColorEntries(sourceIds) {
+  state.colorEntries = buildColorEntries(state.cssSources, {
+    reparse: false,
+    sourceIds: new Set(sourceIds),
+  });
+  return state.colorEntries;
+}
+
 function replacementFor(entry, occurrence) {
   const hex = state.replacements.get(entry.id);
   if (!hex) return occurrence.original;

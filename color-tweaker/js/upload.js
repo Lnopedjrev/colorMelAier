@@ -80,8 +80,6 @@ async function loadUrl(input, button, statusEl) {
     renderColorPanel();
 
     const { skipped } = await readSiteCss();
-    cssEditorEl.value = getCssEditorText();
-    renderColorPanel();
     if (!state.cssSources.length) {
       setUrlStatus(
         statusEl,

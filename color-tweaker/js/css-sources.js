@@ -40,7 +40,7 @@ export function registerCssSource(source) {
   return existing || record;
 }
 
-export function rebuildColorEntries({ clearReplacements = false } = {}) {
+export function rebuildColorEntries(clearReplacements = false) {
   if (clearReplacements) {
     state.replacements.clear();
     state.alphaOverrides.clear();
@@ -118,16 +118,14 @@ export function getFlattenedCss(processed = false) {
     .join("\n\n");
 }
 
-export function getCssEditorText(processed = false) {
+export function getCssEditorText() {
   if (
     state.cssSources.length === 1 &&
     state.cssSources[0].kind === "editor"
   ) {
-    return processed
-      ? processedSourceText(state.cssSources[0])
-      : state.cssSources[0].text;
+    return state.cssSources[0].text;
   }
-  return getCombinedCss(processed);
+  return getCombinedCss();
 }
 
 export function updateSourcesFromCombinedCss(css) {

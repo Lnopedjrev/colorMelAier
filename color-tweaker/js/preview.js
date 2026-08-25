@@ -147,7 +147,7 @@ function applyRemoteSourceChanges(sources, removedIds) {
   const before = colorEntriesSignature();
   rebuildChangedColorEntries(changedIds);
   if (onCssSourcesChanged) {
-    onCssSourcesChanged({ colorsChanged: before !== colorEntriesSignature() });
+    onCssSourcesChanged(before !== colorEntriesSignature());
   }
 }
 
@@ -394,7 +394,7 @@ function scanRoot(root, orderRef, result) {
   }
 }
 
-function scanDocumentSources(doc, { notify = true } = {}) {
+function scanDocumentSources(doc, notify = true) {
   const result = { skipped: 0, seen: new Set() };
   scanRoot(doc, { value: 0 }, result);
   state.cssSources = state.cssSources.filter((source) =>
@@ -571,7 +571,7 @@ function flushRuntimeMutations() {
   const before = colorEntriesSignature();
   rebuildChangedColorEntries(changedIds);
   if (onCssSourcesChanged) {
-    onCssSourcesChanged({ colorsChanged: before !== colorEntriesSignature() });
+    onCssSourcesChanged(before !== colorEntriesSignature());
   }
 }
 
@@ -593,7 +593,7 @@ function handleIframeLoad() {
     if (runtimeObserver) runtimeObserver.disconnect();
     return;
   }
-  if (previewMode !== "url") scanDocumentSources(doc, { notify: true });
+  if (previewMode !== "url") scanDocumentSources(doc);
   observeRuntimeSources(doc);
 }
 
@@ -677,7 +677,7 @@ export async function readSiteCss() {
   const doc = getIframeDocument();
   if (!doc) return requestSiteCss();
 
-  const result = scanDocumentSources(doc, { notify: false });
+  const result = scanDocumentSources(doc);
   observeRuntimeSources(doc);
   return { skipped: result.skipped };
 }

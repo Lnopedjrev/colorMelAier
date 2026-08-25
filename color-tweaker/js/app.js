@@ -36,7 +36,7 @@ const panelUpload = document.getElementById("panel-upload");
 // ---- Initialize Modules ----
 initPreview(preview, {
   onColorsPicked: (colors) => highlightColorEntries(colors),
-  onCssSourcesChanged: ({ colorsChanged = true } = {}) => {
+  onCssSourcesChanged: (colorsChanged = true) => {
     if (colorsChanged || !ed.css.classList.contains("hidden")) {
       ed.css.value = getCssEditorText();
     }
@@ -118,7 +118,7 @@ Object.values(ed).forEach((textarea) => {
 
 function parseAndRefresh() {
   updateSourcesFromCombinedCss(ed.css.value);
-  rebuildColorEntries({ clearReplacements: true });
+  rebuildColorEntries(true);
   renderColorPanel();
   if (isLoadedPreviewActive()) patchCss();
   else updatePreview(ed.html.value, ed.css.value, ed.js.value);

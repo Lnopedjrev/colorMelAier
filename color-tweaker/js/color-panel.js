@@ -117,31 +117,96 @@ export function renderColorPanel() {
     .forEach((input) => input.addEventListener("input", onAlphaPick));
 }
 
-export function highlightColorEntries(colors) {
-  const canonicalColors = new Set(
-    colors.map((color) => toCanonical(color)).filter(Boolean),
+const PROPERTY_SHORTHANDS = {
+  "background-color": ["background"],
+  "border-top-color": ["border", "border-color", "border-top"],
+  "border-right-color": ["border", "border-color", "border-right"],
+  "border-bottom-color": ["border", "border-color", "border-bottom"],
+  "border-left-color": ["border", "border-color", "border-left"],
+  "outline-color": ["outline"],
+  "text-decoration-color": ["text-decoration"],
+  "column-rule-color": ["column-rule"],
+};
+
+function entryUsesProperty(entry, property) {
+  if (!property) return false;
+  const accepted = new Set([property, ...(PROPERTY_SHORTHANDS[property] || [])]);
+  return entry.occurrences.some((occurrence) =>
+    accepted.has(occurrence.property),
   );
-  let firstMatch = null;
-  let matchCount = 0;
+}
 
-  colorListEl.querySelectorAll(".color-entry").forEach((row) => {
-    const entry = state.colorEntries[Number(row.dataset.idx)];
-    const replacement = entry && state.replacements.get(entry.id);
-    const currentCanonical = replacement
-      ? toCanonical(
-          hexToRgba(replacement, getEntryAlpha(entry, state.alphaOverrides)),
-        )
-      : entry?.canonical;
-    const matches = entry && canonicalColors.has(currentCanonical);
-    row.classList.toggle("highlighted", Boolean(matches));
-    if (matches) {
-      matchCount++;
-      if (!firstMatch) firstMatch = row;
-    }
-  });
+function currentCanonical(entry) {
+  const replacement = state.replacements.get(entry.id);
+  return replacement
+    ? toCanonical(
+        hexToRgba(replacement, getEntryAlpha(entry, state.alphaOverrides)),
+      )
+    : entry.canonical;
+}
 
-  if (firstMatch) {
-    firstMatch.scrollIntoView({ behavior: "smooth", block: "nearest" });
+function scrollEntryIntoPanel(row) {
+  const panel = colorListEl.closest(".color-panel");
+  if (!panel) {
+    row.scrollIntoView({ block: "center" });
+    return;
   }
-  return matchCount;
+
+  const panelRect = panel.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  const headerHeight = panel.querySelector(".cp-head")?.offsetHeight || 0;
+  const visibleTop = panelRect.top + headerHeight;
+  if (rowRect.top >= visibleTop && rowRect.bottom <= panelRect.bottom) return;
+
+  const visibleHeight = panel.clientHeight - headerHeight;
+  panel.scrollTo({
+    top:
+      panel.scrollTop +
+      rowRect.top -
+      visibleTop -
+      Math.max(0, (visibleHeight - rowRect.height) / 2),
+    behavior: "auto",
+  });
+}
+
+export function highlightColorEntries(values) {
+  const candidates = values
+    .map((value) =>
+      typeof value === "string"
+        ? { property: null, canonical: toCanonical(value) }
+        : {
+            property: value.property || null,
+            canonical: toCanonical(value.color),
+          },
+    )
+    .filter((candidate) => candidate.canonical);
+  const rows = Array.from(colorListEl.querySelectorAll(".color-entry")).map(
+    (row) => ({
+      row,
+      entry: state.colorEntries[Number(row.dataset.idx)],
+    }),
+  );
+
+  let selected = null;
+  for (const candidate of candidates) {
+    const matches = rows.filter(
+      ({ entry }) => entry && currentCanonical(entry) === candidate.canonical,
+    );
+    if (!matches.length) continue;
+    selected =
+      matches.find(({ entry }) =>
+        entryUsesProperty(entry, candidate.property),
+      ) || matches[0];
+    break;
+  }
+
+  for (const { row } of rows) {
+    row.classList.toggle("highlighted", row === selected?.row);
+  }
+
+  if (selected) {
+    scrollEntryIntoPanel(selected.row);
+    return 1;
+  }
+  return 0;
 }

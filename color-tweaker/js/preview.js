@@ -85,7 +85,9 @@ function handleBridgeMessage(event) {
   if (!iframeEl || event.source !== iframeEl.contentWindow || !event.data)
     return;
   if (event.data.type === "ct-colors-picked") {
-    if (onColorsPicked) onColorsPicked(event.data.colors || []);
+    if (onColorsPicked) {
+      onColorsPicked(event.data.candidates || event.data.colors || []);
+    }
   } else if (event.data.type === "ct-css-sources-changed") {
     installRemoteSources(event.data.sources || []);
   } else if (event.data.type === "ct-css-source-changes") {
@@ -151,10 +153,111 @@ function applyRemoteSourceChanges(sources, removedIds) {
   }
 }
 
-function collectElementColors(element) {
+function hasDirectText(element) {
+  return Array.from(element.childNodes).some(
+    (node) => node.nodeType === 3 && node.textContent.trim(),
+  );
+}
+
+function borderPropertiesAtPoint(element, computed, clientX, clientY) {
+  const rect = element.getBoundingClientRect();
+  const sides = [
+    [
+      "border-top-color",
+      "border-top-width",
+      "border-top-style",
+      clientY - rect.top,
+    ],
+    [
+      "border-right-color",
+      "border-right-width",
+      "border-right-style",
+      rect.right - clientX,
+    ],
+    [
+      "border-bottom-color",
+      "border-bottom-width",
+      "border-bottom-style",
+      rect.bottom - clientY,
+    ],
+    [
+      "border-left-color",
+      "border-left-width",
+      "border-left-style",
+      clientX - rect.left,
+    ],
+  ];
+  return sides
+    .filter(([, widthProperty, styleProperty, distance]) => {
+      const width = parseFloat(computed.getPropertyValue(widthProperty));
+      const style = computed.getPropertyValue(styleProperty);
+      return (
+        width > 0 &&
+        style !== "none" &&
+        style !== "hidden" &&
+        distance >= 0 &&
+        distance <= width
+      );
+    })
+    .sort((a, b) => a[3] - b[3])
+    .map(([property]) => property);
+}
+
+function isRenderedColorProperty(element, computed, property) {
+  if (property.startsWith("border-") && property.endsWith("-color")) {
+    const side = property.slice(7, -6);
+    return (
+      parseFloat(computed.getPropertyValue(`border-${side}-width`)) > 0 &&
+      !["none", "hidden"].includes(
+        computed.getPropertyValue(`border-${side}-style`),
+      )
+    );
+  }
+  if (property === "outline-color") {
+    return (
+      parseFloat(computed.getPropertyValue("outline-width")) > 0 &&
+      computed.getPropertyValue("outline-style") !== "none"
+    );
+  }
+  if (property === "text-decoration-color") {
+    return computed.getPropertyValue("text-decoration-line") !== "none";
+  }
+  if (property === "column-rule-color") {
+    return (
+      parseFloat(computed.getPropertyValue("column-rule-width")) > 0 &&
+      computed.getPropertyValue("column-rule-style") !== "none"
+    );
+  }
+  if (property === "caret-color") {
+    return element.matches("input, textarea, [contenteditable]");
+  }
+  if (property === "fill" || property === "stroke") {
+    return element.namespaceURI === "http://www.w3.org/2000/svg";
+  }
+  return true;
+}
+
+function collectElementColors(element, clientX, clientY) {
   const computed = element.ownerDocument.defaultView.getComputedStyle(element);
-  const colors = new Set();
-  for (const property of INSPECTED_COLOR_PROPERTIES) {
+  const isSvg = element.namespaceURI === "http://www.w3.org/2000/svg";
+  const priority = [
+    ...borderPropertiesAtPoint(element, computed, clientX, clientY),
+    ...(isSvg ? ["fill", "stroke"] : []),
+    ...(hasDirectText(element)
+      ? ["color", "background-color"]
+      : ["background-color", "color"]),
+    ...INSPECTED_COLOR_PROPERTIES,
+  ];
+  const candidates = [];
+  const seen = new Set();
+  for (const property of priority) {
+    if (
+      seen.has(property) ||
+      !isRenderedColorProperty(element, computed, property)
+    ) {
+      continue;
+    }
+    seen.add(property);
     const value = computed.getPropertyValue(property).trim();
     if (
       value &&
@@ -162,17 +265,21 @@ function collectElementColors(element) {
       value !== "transparent" &&
       value !== "rgba(0, 0, 0, 0)"
     ) {
-      colors.add(value);
+      candidates.push({ property, color: value });
     }
   }
-  return Array.from(colors);
+  return candidates;
 }
 
 function handleInspectedClick(event) {
   if (!inspectorActive) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  if (onColorsPicked) onColorsPicked(collectElementColors(event.target));
+  if (onColorsPicked) {
+    onColorsPicked(
+      collectElementColors(event.target, event.clientX, event.clientY),
+    );
+  }
 }
 
 function setInspectorCursor(doc, active) {

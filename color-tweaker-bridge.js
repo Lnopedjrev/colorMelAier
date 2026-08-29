@@ -481,10 +481,36 @@
     installObserver(observedRoots);
   }
 
-  function hasDirectText(element) {
-    return Array.from(element.childNodes).some(
-      (node) => node.nodeType === 3 && node.textContent.trim(),
-    );
+  function pointHitsText(element, clientX, clientY) {
+    let node = null;
+    let offset = 0;
+    if (document.caretPositionFromPoint) {
+      const position = document.caretPositionFromPoint(clientX, clientY);
+      node = position?.offsetNode;
+      offset = position?.offset ?? 0;
+    } else if (document.caretRangeFromPoint) {
+      const caretRange = document.caretRangeFromPoint(clientX, clientY);
+      node = caretRange?.startContainer;
+      offset = caretRange?.startOffset ?? 0;
+    }
+    if (!node || node.nodeType !== 3 || !element.contains(node)) return false;
+
+    const text = node.textContent || "";
+    for (const index of [offset, offset - 1]) {
+      if (index < 0 || index >= text.length || !text[index].trim()) continue;
+      const range = document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + 1);
+      const hit = Array.from(range.getClientRects()).some(
+        (rect) =>
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom,
+      );
+      if (hit) return true;
+    }
+    return false;
   }
 
   function borderPropertiesAtPoint(element, computed, clientX, clientY) {
@@ -567,34 +593,61 @@
 
   function collectElementColors(element, clientX, clientY) {
     const computed = window.getComputedStyle(element);
+    const computedStyles = new WeakMap([[element, computed]]);
+    const getComputed = (owner) => {
+      if (!computedStyles.has(owner)) {
+        computedStyles.set(owner, window.getComputedStyle(owner));
+      }
+      return computedStyles.get(owner);
+    };
     const isSvg = element.namespaceURI === "http://www.w3.org/2000/svg";
-    const priority = [
-      ...borderPropertiesAtPoint(element, computed, clientX, clientY),
-      ...(isSvg ? ["fill", "stroke"] : []),
-      ...(hasDirectText(element)
-        ? ["color", "background-color"]
-        : ["background-color", "color"]),
-      ...inspectedColorProperties,
-    ];
     const candidates = [];
     const seen = new Set();
-    for (const property of priority) {
-      if (
-        seen.has(property) ||
-        !isRenderedColorProperty(element, computed, property)
-      ) {
-        continue;
-      }
-      seen.add(property);
-      const value = computed.getPropertyValue(property).trim();
+    const addCandidate = (owner, property) => {
+      const ownerComputed = getComputed(owner);
+      if (!isRenderedColorProperty(owner, ownerComputed, property)) return false;
+      const value = ownerComputed.getPropertyValue(property).trim();
       if (
         value &&
         value !== "none" &&
         value !== "transparent" &&
         value !== "rgba(0, 0, 0, 0)"
       ) {
+        const key = `${property}:${value}`;
+        if (seen.has(key)) return true;
+        seen.add(key);
         candidates.push({ property, color: value });
+        return true;
       }
+      return false;
+    };
+
+    for (const property of borderPropertiesAtPoint(
+      element,
+      computed,
+      clientX,
+      clientY,
+    )) {
+      addCandidate(element, property);
+    }
+    if (isSvg) {
+      addCandidate(element, "fill");
+      addCandidate(element, "stroke");
+    }
+
+    const textHit = pointHitsText(element, clientX, clientY);
+    if (textHit) addCandidate(element, "color");
+
+    let backgroundOwner = element;
+    while (backgroundOwner) {
+      if (addCandidate(backgroundOwner, "background-color")) break;
+      const root = backgroundOwner.getRootNode();
+      backgroundOwner = backgroundOwner.parentElement || root.host || null;
+    }
+
+    if (!textHit) addCandidate(element, "color");
+    for (const property of inspectedColorProperties) {
+      addCandidate(element, property);
     }
     return candidates;
   }

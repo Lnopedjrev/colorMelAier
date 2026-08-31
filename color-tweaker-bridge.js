@@ -707,6 +707,19 @@
       applySourceUpdates(event.data.updates);
     } else if (event.data.type === "ct-inspect-mode") {
       setInspector(Boolean(event.data.active), event.origin);
+    } else if (event.data.type === "ct-inspect-point") {
+      const x = Number(event.data.x);
+      const y = Number(event.data.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      const element = document.elementFromPoint(x, y);
+      if (!element) return;
+      event.source.postMessage(
+        {
+          type: "ct-colors-picked",
+          candidates: collectElementColors(element, x, y),
+        },
+        event.origin,
+      );
     }
   });
 })();

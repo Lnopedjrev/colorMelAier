@@ -6,6 +6,7 @@ import {
   patchCss,
   getProcessedCss,
   setPreviewInspector,
+  setFrozenPreviewInspector,
   isLoadedPreviewActive,
   download,
 } from "./preview.js";
@@ -31,6 +32,9 @@ const ed = {
 const preview = document.getElementById("preview");
 const tabs = document.getElementById("tabs");
 const btnInspectColor = document.getElementById("btn-inspect-color");
+const btnFrozenInspectColor = document.getElementById(
+  "btn-frozen-inspect-color",
+);
 const panelUpload = document.getElementById("panel-upload");
 
 // ---- Initialize Modules ----
@@ -67,12 +71,33 @@ initUpload(
   },
 );
 
+let inspectorMode = "off";
+
+function setInspectorMode(mode) {
+  inspectorMode = mode;
+  const inspectActive = mode === "inspect";
+  const frozenActive = mode === "frozen";
+
+  btnInspectColor.setAttribute("aria-pressed", String(inspectActive));
+  btnInspectColor.classList.toggle("active", inspectActive);
+  btnInspectColor.textContent = inspectActive ? "Inspecting…" : "Inspect";
+
+  btnFrozenInspectColor.setAttribute("aria-pressed", String(frozenActive));
+  btnFrozenInspectColor.classList.toggle("active", frozenActive);
+  btnFrozenInspectColor.textContent = frozenActive
+    ? "Frozen…"
+    : "Frozen Inspect";
+
+  setPreviewInspector(inspectActive);
+  setFrozenPreviewInspector(frozenActive);
+}
+
 btnInspectColor.addEventListener("click", () => {
-  const active = btnInspectColor.getAttribute("aria-pressed") !== "true";
-  btnInspectColor.setAttribute("aria-pressed", String(active));
-  btnInspectColor.classList.toggle("active", active);
-  btnInspectColor.textContent = active ? "Inspecting…" : "Inspect";
-  setPreviewInspector(active);
+  setInspectorMode(inspectorMode === "inspect" ? "off" : "inspect");
+});
+
+btnFrozenInspectColor.addEventListener("click", () => {
+  setInspectorMode(inspectorMode === "frozen" ? "off" : "frozen");
 });
 
 tabs.addEventListener("click", (e) => {

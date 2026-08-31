@@ -19,6 +19,8 @@ let siteMessageOrigin = "*";
 let requestSequence = 0;
 let inspectorActive = false;
 let inspectorDocument = null;
+let frozenInspectorActive = false;
+let frozenInspectorOverlay = null;
 let onColorsPicked = null;
 let onCssSourcesChanged = null;
 let runtimeObserver = null;
@@ -67,9 +69,13 @@ const IFRAME_LISTENER = `
 
 export function initPreview(iframe, callbacks = {}) {
   iframeEl = iframe;
+  frozenInspectorOverlay = iframe.parentElement.querySelector(
+    ".frozen-inspector-overlay",
+  );
   onColorsPicked = callbacks.onColorsPicked || null;
   onCssSourcesChanged = callbacks.onCssSourcesChanged || null;
   iframeEl.addEventListener("load", handleIframeLoad);
+  frozenInspectorOverlay?.addEventListener("click", handleFrozenInspectedClick);
   window.addEventListener("message", handleBridgeMessage);
 }
 
@@ -337,6 +343,29 @@ function handleInspectedClick(event) {
   }
 }
 
+function handleFrozenInspectedClick(event) {
+  if (!frozenInspectorActive || !iframeEl?.contentWindow) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  const rect = iframeEl.getBoundingClientRect();
+  const clientX = event.clientX - rect.left;
+  const clientY = event.clientY - rect.top;
+  const doc = getIframeDocument();
+  if (doc) {
+    const element = doc.elementFromPoint(clientX, clientY);
+    if (element && onColorsPicked) {
+      onColorsPicked(collectElementColors(element, clientX, clientY));
+    }
+    return;
+  }
+
+  iframeEl.contentWindow.postMessage(
+    { type: "ct-inspect-point", x: clientX, y: clientY },
+    siteMessageOrigin,
+  );
+}
+
 function setInspectorCursor(doc, active) {
   let style = doc.getElementById("__ct-inspector");
   if (active && !style) {
@@ -374,6 +403,11 @@ function syncInspector() {
 export function setPreviewInspector(active) {
   inspectorActive = active;
   syncInspector();
+}
+
+export function setFrozenPreviewInspector(active) {
+  frozenInspectorActive = active;
+  if (frozenInspectorOverlay) frozenInspectorOverlay.hidden = !active;
 }
 
 export function download(content, filename, type) {

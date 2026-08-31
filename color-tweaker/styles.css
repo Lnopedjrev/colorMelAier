@@ -169,7 +169,9 @@ main{display:flex;flex:1;min-height:0}
   font-size:11px;font-weight:600;text-transform:uppercase;
   letter-spacing:.05em;color:var(--text-muted);
 }
-.preview-panel iframe{flex:1;border:none;background:#fff;width:100%}
+.preview-surface{position:relative;flex:1;min-height:0}
+.preview-panel iframe{position:absolute;inset:0;border:none;background:#fff;width:100%;height:100%}
+.frozen-inspector-overlay{position:absolute;inset:0;z-index:1;cursor:crosshair}
 
 .empty{padding:20px 12px;text-align:center;color:var(--text-muted);font-size:12px}
 

@@ -52,6 +52,7 @@
           <div class="cp-head-right">
             <span class="pill" id="cp-count">0</span>
             <button class="btn-reset" id="btn-inspect-color" aria-pressed="false">Inspect</button>
+            <button class="btn-reset" id="btn-frozen-inspect-color" aria-pressed="false">Frozen Inspect</button>
             <button class="btn-reset" id="btn-reset">Reset</button>
           </div>
         </div>
@@ -60,7 +61,10 @@
     </div>
     <div class="preview-panel">
       <div class="preview-head"><h3>Preview</h3></div>
-      <iframe id="preview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+      <div class="preview-surface">
+        <iframe id="preview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+        <div id="frozen-inspector-overlay" class="frozen-inspector-overlay" hidden></div>
+      </div>
     </div>
   </main>
 </div>

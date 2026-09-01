@@ -495,7 +495,7 @@ async function loadBuild() {
     });
   }
 
-  // Inline style attributes are editable sources too.
+  // Inline style attributes are registered as CSS sources too.
   for (const element of Array.from(doc.querySelectorAll("[style]"))) {
     const id = `build-attribute-${++sourceSequence}`;
     element.dataset.ctInlineSource = id;

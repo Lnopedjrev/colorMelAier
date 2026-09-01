@@ -697,7 +697,6 @@
         {
           type: "ct-css-response",
           requestId: event.data.requestId,
-          protocol: 2,
           sources: result.sources,
           skipped: result.skipped,
         },

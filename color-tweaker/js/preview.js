@@ -852,7 +852,7 @@ function requestSiteCss() {
       if (event.source !== iframeEl.contentWindow) return;
       if (!event.data || event.data.type !== "ct-css-response") return;
       if (event.data.requestId !== requestId) return;
-      if (event.data.protocol !== 2 || !Array.isArray(event.data.sources)) return;
+      if (!Array.isArray(event.data.sources)) return;
       cleanup();
       siteMessageOrigin = event.origin;
       const sources = event.data.sources;
@@ -863,7 +863,7 @@ function requestSiteCss() {
     };
     window.addEventListener("message", onMessage);
     iframeEl.contentWindow.postMessage(
-      { protocol: 2, type: "ct-css-request", requestId },
+      { type: "ct-css-request", requestId },
       "*",
     );
   });
@@ -971,7 +971,7 @@ export function patchCss() {
     remoteAppliedTexts.set(update.id, update.text);
   }
   iframeEl.contentWindow.postMessage(
-    { protocol: 2, type: "ct-source-update", updates: changedUpdates },
+    { type: "ct-source-update", updates: changedUpdates },
     siteMessageOrigin,
   );
 }

@@ -5,11 +5,9 @@ import { buildColorEntries } from "./css-parser.js";
 import { extractAlpha, hexToRgba } from "./utils.js";
 
 const MARKER_RE = /\/\*\s*=== ColorTweaker source:([^\s]+)[^*]*===\s*\*\//g;
-let sourceSequence = 0;
 
 function safeId(value) {
-  return String(value || `source-${++sourceSequence}`)
-    .replace(/[^a-zA-Z0-9_.:-]+/g, "-");
+  return String(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-");
 }
 
 export function resetCssSources(mode = "editor") {
@@ -21,6 +19,9 @@ export function resetCssSources(mode = "editor") {
 }
 
 export function registerCssSource(source) {
+  if (!source?.id) {
+    throw new TypeError("registerCssSource requires source.id");
+  }
   const id = safeId(source.id);
   const existing = state.cssSources.find((item) => item.id === id);
   const record = {
@@ -31,7 +32,6 @@ export function registerCssSource(source) {
     order: source.order ?? state.cssSources.length,
     href: source.href || null,
     owner: source.owner || null,
-    editable: source.editable !== false,
     occurrences: [],
   };
   if (existing) Object.assign(existing, record);
@@ -93,7 +93,6 @@ export function processedSourceText(source) {
 
 export function getCssSourceUpdates() {
   return state.cssSources
-    .filter((source) => source.editable)
     .map((source) => ({
       id: source.id,
       kind: source.kind,

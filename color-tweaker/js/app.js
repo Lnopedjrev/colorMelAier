@@ -22,6 +22,7 @@ import {
   highlightColorEntries,
 } from "./color-panel.js";
 import { initUpload } from "./upload.js";
+import { initPreviewRecorder } from "./recorder.js";
 
 // ---- DOM References ----
 const ed = {
@@ -99,6 +100,12 @@ btnInspectColor.addEventListener("click", () => {
 btnFrozenInspectColor.addEventListener("click", () => {
   setInspectorMode(inspectorMode === "frozen" ? "off" : "frozen");
 });
+
+initPreviewRecorder(
+  document.getElementById("btn-record-preview"),
+  document.getElementById("btn-stop-recording"),
+  () => setInspectorMode("off"),
+);
 
 tabs.addEventListener("click", (e) => {
   const tab = e.target.closest(".tab");

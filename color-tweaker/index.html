@@ -11,6 +11,7 @@
   <header>
     <h1><span>Color</span>Tweaker</h1>
     <div class="toolbar">
+      <button class="btn" id="btn-record-preview" title="Choose this tab in the browser capture dialog">Record 5s</button>
       <button class="btn" id="btn-export-css">Export CSS</button>
       <button class="btn" id="btn-export-html">Export HTML</button>
     </div>
@@ -68,6 +69,9 @@
     </div>
   </main>
 </div>
+<button class="recording-stop" id="btn-stop-recording" type="button" aria-label="Stop recording" title="Stop recording" hidden>
+  <span aria-hidden="true"></span>
+</button>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

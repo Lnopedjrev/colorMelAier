@@ -1,4 +1,18 @@
 const MAX_RECORDING_MS = 5000;
+const DEFAULT_FRAME_RATE = 30;
+const MIN_FRAME_RATE = 1;
+const MAX_FRAME_RATE = 60;
+
+function selectedFrameRate(input) {
+  const requested = input.value.trim()
+    ? Math.round(Number(input.value))
+    : Number.NaN;
+  const frameRate = Number.isFinite(requested)
+    ? Math.min(MAX_FRAME_RATE, Math.max(MIN_FRAME_RATE, requested))
+    : DEFAULT_FRAME_RATE;
+  input.value = String(frameRate);
+  return frameRate;
+}
 
 function recordingFormat() {
   const formats = [
@@ -65,7 +79,7 @@ async function waitForCapturedFrame(stream) {
 
 let stopActiveRecording = null;
 
-async function recordPreview(button, stopButton, beforeRecording) {
+async function recordPreview(button, stopButton, fpsInput, beforeRecording) {
   if (
     !navigator.mediaDevices?.getDisplayMedia ||
     typeof MediaRecorder === "undefined"
@@ -74,13 +88,15 @@ async function recordPreview(button, stopButton, beforeRecording) {
     return;
   }
 
+  const frameRate = selectedFrameRate(fpsInput);
+  fpsInput.closest("details")?.removeAttribute("open");
   button.disabled = true;
 
   let stream = null;
   let stopTimer = null;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30, max: 30 } },
+      video: { frameRate: { ideal: frameRate, max: frameRate } },
       audio: false,
       preferCurrentTab: true,
     });
@@ -144,10 +160,12 @@ async function recordPreview(button, stopButton, beforeRecording) {
 export function initPreviewRecorder(
   button,
   stopButton,
+  fpsInput,
   beforeRecording = () => {},
 ) {
+  fpsInput.addEventListener("change", () => selectedFrameRate(fpsInput));
   button.addEventListener("click", () => {
-    recordPreview(button, stopButton, beforeRecording);
+    recordPreview(button, stopButton, fpsInput, beforeRecording);
   });
   stopButton.addEventListener("click", () => {
     stopActiveRecording?.();

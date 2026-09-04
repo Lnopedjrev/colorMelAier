@@ -104,6 +104,7 @@ btnFrozenInspectColor.addEventListener("click", () => {
 initPreviewRecorder(
   document.getElementById("btn-record-preview"),
   document.getElementById("btn-stop-recording"),
+  document.getElementById("recording-fps"),
   () => setInspectorMode("off"),
 );
 

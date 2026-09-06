@@ -1,6 +1,6 @@
 # ColorTweaker
 
-ColorTweaker loads inline HTML/CSS/JavaScript, a website URL, or a local production build into an iframe. It finds colors in the loaded CSS, exposes them through color and alpha controls, applies changes to the preview immediately, exports the resulting CSS, and can record up to five seconds of preview interaction for download.
+ColorTweaker loads inline HTML/CSS/JavaScript, a website URL, or a local production build into an iframe. It finds colors in the loaded CSS, exposes them through color and alpha controls, applies changes to the preview immediately, exports the resulting CSS, and can record up to five seconds of preview interaction for download or optional endpoint scoring.
 
 ## Parsing and work regimes
 

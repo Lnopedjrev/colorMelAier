@@ -30,16 +30,70 @@ function recordingFormat() {
   );
 }
 
-function saveRecording(blob, extension) {
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `color-tweaker-${new Date()
+function recordingFilename(extension) {
+  return `color-tweaker-${new Date()
     .toISOString()
     .replace(/[:.]/g, "-")}.${extension}`;
+}
+
+function saveRecording(blob, filename) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
+}
+
+function scoreFromPayload(payload) {
+  let score = payload;
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    if ("score" in payload) score = payload.score;
+    else if ("vector" in payload) score = payload.vector;
+  }
+
+  if (typeof score === "number" && Number.isFinite(score)) return score;
+  if (
+    Array.isArray(score) &&
+    score.length > 0 &&
+    score.every((value) => typeof value === "number" && Number.isFinite(value))
+  ) {
+    return score;
+  }
+  throw new TypeError(
+    "The scoring endpoint must return a JSON number, numeric array, score, or vector.",
+  );
+}
+
+// POST multipart/form-data with `video` and `fps`. The response may be a JSON
+// number, number array, { score: number | number[] }, or { vector: number[] }.
+export async function requestVideoScore(endpoint, blob, filename, frameRate) {
+  const body = new FormData();
+  body.append("video", blob, filename);
+  body.append("fps", String(frameRate));
+
+  const response = await fetch(new URL(endpoint, window.location.href), {
+    method: "POST",
+    body,
+  });
+  if (!response.ok) {
+    throw new Error(`Scoring endpoint returned HTTP ${response.status}.`);
+  }
+  return scoreFromPayload(await response.json());
+}
+
+function showScoreStatus(output, text, state, fullText = text) {
+  output.hidden = false;
+  output.dataset.state = state;
+  output.textContent = text;
+  output.title = fullText;
+}
+
+function showScore(output, score) {
+  const value = Array.isArray(score) ? `[${score.join(", ")}]` : String(score);
+  const abbreviated = value.length > 64 ? `${value.slice(0, 61)}…` : value;
+  showScoreStatus(output, `Score: ${abbreviated}`, "success", `Score: ${value}`);
 }
 
 function delay(milliseconds) {
@@ -79,7 +133,14 @@ async function waitForCapturedFrame(stream) {
 
 let stopActiveRecording = null;
 
-async function recordPreview(button, stopButton, fpsInput, beforeRecording) {
+async function recordPreview(
+  button,
+  stopButton,
+  fpsInput,
+  endpointInput,
+  scoreOutput,
+  beforeRecording,
+) {
   if (
     !navigator.mediaDevices?.getDisplayMedia ||
     typeof MediaRecorder === "undefined"
@@ -90,10 +151,12 @@ async function recordPreview(button, stopButton, fpsInput, beforeRecording) {
 
   const frameRate = selectedFrameRate(fpsInput);
   fpsInput.closest("details")?.removeAttribute("open");
+  scoreOutput.hidden = true;
   button.disabled = true;
 
   let stream = null;
   let stopTimer = null;
+  let recording = null;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: { ideal: frameRate, max: frameRate } },
@@ -140,7 +203,10 @@ async function recordPreview(button, stopButton, fpsInput, beforeRecording) {
     if (chunks.length) {
       const mimeType = recorder.mimeType || format.mimeType || "video/webm";
       const extension = mimeType.includes("mp4") ? "mp4" : format.extension;
-      saveRecording(new Blob(chunks, { type: mimeType }), extension);
+      recording = {
+        blob: new Blob(chunks, { type: mimeType }),
+        filename: recordingFilename(extension),
+      };
     }
   } catch (error) {
     if (error.name !== "NotAllowedError" && error.name !== "AbortError") {
@@ -155,17 +221,50 @@ async function recordPreview(button, stopButton, fpsInput, beforeRecording) {
     document.body.classList.remove("recording-preview-mode");
     button.disabled = false;
   }
+
+  if (!recording) return;
+  saveRecording(recording.blob, recording.filename);
+
+  const endpoint = endpointInput.value.trim();
+  if (!endpoint) return;
+  showScoreStatus(scoreOutput, "Scoring…", "pending");
+  try {
+    const score = await requestVideoScore(
+      endpoint,
+      recording.blob,
+      recording.filename,
+      frameRate,
+    );
+    showScore(scoreOutput, score);
+  } catch (error) {
+    console.error(error);
+    showScoreStatus(
+      scoreOutput,
+      "Scoring failed",
+      "error",
+      error.message || "Scoring failed",
+    );
+  }
 }
 
 export function initPreviewRecorder(
   button,
   stopButton,
   fpsInput,
+  endpointInput,
+  scoreOutput,
   beforeRecording = () => {},
 ) {
   fpsInput.addEventListener("change", () => selectedFrameRate(fpsInput));
   button.addEventListener("click", () => {
-    recordPreview(button, stopButton, fpsInput, beforeRecording);
+    recordPreview(
+      button,
+      stopButton,
+      fpsInput,
+      endpointInput,
+      scoreOutput,
+      beforeRecording,
+    );
   });
   stopButton.addEventListener("click", () => {
     stopActiveRecording?.();

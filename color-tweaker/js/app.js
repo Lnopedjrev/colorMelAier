@@ -105,7 +105,6 @@ initPreviewRecorder(
   document.getElementById("btn-record-preview"),
   document.getElementById("btn-stop-recording"),
   document.getElementById("recording-fps"),
-  document.getElementById("recording-score-endpoint"),
   document.getElementById("recording-score"),
   () => setInspectorMode("off"),
 );

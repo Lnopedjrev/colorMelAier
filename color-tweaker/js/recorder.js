@@ -1,3 +1,5 @@
+import { RECORDING_SCORE_ENDPOINT } from "./config.js";
+
 const MAX_RECORDING_MS = 5000;
 const DEFAULT_FRAME_RATE = 30;
 const MIN_FRAME_RATE = 1;
@@ -137,7 +139,6 @@ async function recordPreview(
   button,
   stopButton,
   fpsInput,
-  endpointInput,
   scoreOutput,
   beforeRecording,
 ) {
@@ -225,7 +226,7 @@ async function recordPreview(
   if (!recording) return;
   saveRecording(recording.blob, recording.filename);
 
-  const endpoint = endpointInput.value.trim();
+  const endpoint = RECORDING_SCORE_ENDPOINT.trim();
   if (!endpoint) return;
   showScoreStatus(scoreOutput, "Scoring…", "pending");
   try {
@@ -251,7 +252,6 @@ export function initPreviewRecorder(
   button,
   stopButton,
   fpsInput,
-  endpointInput,
   scoreOutput,
   beforeRecording = () => {},
 ) {
@@ -261,7 +261,6 @@ export function initPreviewRecorder(
       button,
       stopButton,
       fpsInput,
-      endpointInput,
       scoreOutput,
       beforeRecording,
     );

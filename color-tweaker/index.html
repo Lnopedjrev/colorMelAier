@@ -11,21 +11,20 @@
   <header>
     <h1><span>Color</span>Tweaker</h1>
     <div class="toolbar">
-      <details class="recording-settings">
-        <summary class="btn" title="Recording settings">FPS</summary>
-        <div class="recording-settings-popover">
-          <label for="recording-fps">Capture frame rate</label>
-          <div class="recording-fps-input">
-            <input id="recording-fps" type="number" min="1" max="60" step="1" value="30" aria-describedby="recording-fps-note">
-            <span>FPS</span>
+      <div class="recording-controls">
+        <button class="btn" id="btn-record-preview" title="Choose this tab in the browser capture dialog">Record 5s</button>
+        <details class="recording-settings">
+          <summary class="btn" title="Recording settings">Recording settings</summary>
+          <div class="recording-settings-popover">
+            <label for="recording-fps">Capture frame rate</label>
+            <div class="recording-fps-input">
+              <input id="recording-fps" type="number" min="1" max="60" step="1" value="30" aria-describedby="recording-fps-note">
+              <span>FPS</span>
+            </div>
+            <p id="recording-fps-note">Above 30 FPS can increase encoder load and may reduce smoothness or output quality.</p>
           </div>
-          <p id="recording-fps-note">Above 30 FPS can increase encoder load and may reduce smoothness or output quality.</p>
-          <label class="recording-endpoint-label" for="recording-score-endpoint">Scoring endpoint <span>(optional)</span></label>
-          <input class="recording-endpoint" id="recording-score-endpoint" type="text" inputmode="url" placeholder="/api/score">
-          <p class="recording-endpoint-note">Sends a multipart POST with <code>video</code> and <code>fps</code> fields.</p>
-        </div>
-      </details>
-      <button class="btn" id="btn-record-preview" title="Choose this tab in the browser capture dialog">Record 5s</button>
+        </details>
+      </div>
       <output class="recording-score" id="recording-score" aria-live="polite" hidden></output>
       <button class="btn" id="btn-export-css">Export CSS</button>
       <button class="btn" id="btn-export-html">Export HTML</button>

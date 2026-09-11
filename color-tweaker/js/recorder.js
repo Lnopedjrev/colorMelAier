@@ -69,7 +69,6 @@ function scoreFromPayload(payload) {
 }
 
 // POST multipart/form-data with `video` and `fps`. The response may be a JSON
-// number, number array, { score: number | number[] }, or { vector: number[] }.
 export async function requestVideoScore(endpoint, blob, filename, frameRate) {
   const body = new FormData();
   body.append("video", blob, filename);

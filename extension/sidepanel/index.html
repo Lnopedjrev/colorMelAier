@@ -10,12 +10,37 @@
     <main>
       <header>
         <h1><span>Color</span>Tweaker</h1>
-        <span class="phase">Extension shell</span>
+        <span class="phase">Current tab</span>
       </header>
-      <section class="status" aria-live="polite">
-        <strong>Shared core ready</strong>
-        <p>Active-tab attachment and the full color panel are the next phase.</p>
+      <section class="connection-card">
+        <div class="tab-copy">
+          <strong id="tab-title">Active tab</strong>
+          <span id="tab-url"></span>
+        </div>
+        <div class="actions">
+          <button id="attach" class="primary" type="button">Attach</button>
+          <button id="refresh" type="button" disabled>Rescan</button>
+          <button id="detach" type="button" disabled>Detach</button>
+        </div>
+        <div id="status" class="status" aria-live="polite">Not attached.</div>
+        <button id="grant-access" class="permission" type="button" hidden></button>
       </section>
+      <section class="summary" aria-label="Scan summary">
+        <span><strong id="source-count">0</strong> sources</span>
+        <span><strong id="color-count">0</strong> colors</span>
+        <span><strong id="skipped-count">0</strong> skipped</span>
+      </section>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Colors</h2>
+          <button id="reset" type="button" disabled>Reset</button>
+        </div>
+        <div id="color-list" class="color-list empty">Attach to a page to scan its colors.</div>
+      </section>
+      <details class="sources-panel">
+        <summary>CSS sources</summary>
+        <div id="source-list" class="source-list"></div>
+      </details>
     </main>
     <script type="module" src="app.js"></script>
   </body>

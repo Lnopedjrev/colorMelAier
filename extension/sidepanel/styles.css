@@ -41,7 +41,9 @@ h1 span {
   font-size: 11px;
 }
 
-.status {
+.connection-card,
+.panel,
+.sources-panel {
   margin-top: 18px;
   border: 1px solid #2e3340;
   border-radius: 10px;
@@ -49,8 +51,191 @@ h1 span {
   background: #181b22;
 }
 
-.status p {
-  margin: 6px 0 0;
+.tab-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tab-copy strong,
+.tab-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-copy span,
+.status,
+.empty {
   color: #aeb4c3;
+  font-size: 12px;
   line-height: 1.45;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+
+button {
+  border: 1px solid #3a4050;
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: #222630;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #2a2f3b;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+button.primary {
+  border-color: #8464e8;
+  background: #7554dc;
+}
+
+.status {
+  margin-top: 12px;
+}
+
+.status.error {
+  color: #ff9b9b;
+}
+
+.status.success {
+  color: #8ce4b4;
+}
+
+.permission {
+  width: 100%;
+  margin-top: 10px;
+  border-color: #856f34;
+  background: #302a1b;
+  color: #f0d37d;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.summary span {
+  display: grid;
+  gap: 2px;
+  border: 1px solid #292e39;
+  border-radius: 8px;
+  padding: 9px;
+  background: #15181e;
+  color: #8f96a6;
+  font-size: 11px;
+  text-align: center;
+}
+
+.summary strong {
+  color: #f1f3f7;
+  font-size: 16px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.color-list {
+  display: grid;
+  gap: 8px;
+}
+
+.color-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #292e39;
+  border-radius: 8px;
+  padding: 8px;
+  background: #14171d;
+}
+
+.color-row input[type="color"] {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.color-copy {
+  min-width: 0;
+}
+
+.color-copy strong,
+.color-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.color-copy strong {
+  font-size: 12px;
+}
+
+.color-copy span,
+.color-count {
+  color: #8f96a6;
+  font-size: 11px;
+}
+
+.sources-panel summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.source-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.source-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.source-kind {
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #292e39;
+  color: #aeb4c3;
+}
+
+.source-name {
+  overflow: hidden;
+  color: #c9ced9;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

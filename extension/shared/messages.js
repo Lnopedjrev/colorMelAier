@@ -1,9 +1,13 @@
 export const MESSAGE_TYPES = Object.freeze({
+  PING: "ct:ping",
   ATTACH_REQUEST: "ct:attach-request",
   DETACH_REQUEST: "ct:detach-request",
+  GET_ACTIVE_SESSION: "ct:get-active-session",
+  SESSION_STATE: "ct:session-state",
   SCAN_REQUEST: "ct:scan-request",
   SOURCES_SNAPSHOT: "ct:sources-snapshot",
   SOURCES_CHANGED: "ct:sources-changed",
+  REGISTER_REMOTE_SOURCES: "ct:register-remote-sources",
   APPLY_SOURCE_UPDATES: "ct:apply-source-updates",
   INSPECT_START: "ct:inspect-start",
   INSPECT_STOP: "ct:inspect-stop",

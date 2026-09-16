@@ -24,6 +24,10 @@
         </div>
         <div id="status" class="status" aria-live="polite">Not attached.</div>
         <button id="grant-access" class="permission" type="button" hidden></button>
+        <details id="remote-failures" class="remote-failures" hidden>
+          <summary>Remote stylesheet errors</summary>
+          <div id="remote-failure-list"></div>
+        </details>
       </section>
       <section class="summary" aria-label="Scan summary">
         <span><strong id="source-count">0</strong> sources</span>
@@ -33,13 +37,27 @@
       <section class="panel">
         <div class="panel-heading">
           <h2>Colors</h2>
-          <button id="reset" type="button" disabled>Reset</button>
+          <div class="panel-actions">
+            <button id="inspect" type="button" aria-pressed="false" disabled>Inspect</button>
+            <button id="frozen-inspect" type="button" aria-pressed="false" disabled>Frozen</button>
+            <button id="export-css" type="button" disabled>Export CSS</button>
+            <button id="reset" type="button" disabled>Reset all</button>
+          </div>
         </div>
         <div id="color-list" class="color-list empty">Attach to a page to scan its colors.</div>
       </section>
       <details class="sources-panel">
         <summary>CSS sources</summary>
         <div id="source-list" class="source-list"></div>
+        <div class="source-editor">
+          <label for="source-select">Edit source</label>
+          <select id="source-select" disabled></select>
+          <textarea id="source-editor" spellcheck="false" disabled></textarea>
+          <div class="source-editor-actions">
+            <button id="reload-source" type="button" disabled>Discard field edits</button>
+            <button id="apply-source" class="primary" type="button" disabled>Apply source</button>
+          </div>
+        </div>
       </details>
     </main>
     <script type="module" src="app.js"></script>

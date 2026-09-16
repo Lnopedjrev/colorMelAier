@@ -148,10 +148,28 @@ button.primary {
 
 .panel-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
+}
+
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.panel-actions button {
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.panel-actions button.active,
+.panel-actions button[aria-pressed="true"] {
+  border-color: #9d7bff;
+  background: #493585;
 }
 
 h2 {
@@ -173,6 +191,11 @@ h2 {
   border-radius: 8px;
   padding: 8px;
   background: #14171d;
+}
+
+.color-row.inspected {
+  border-color: #b399ff;
+  box-shadow: 0 0 0 2px rgb(157 123 255 / 25%);
 }
 
 .color-row input[type="color"] {
@@ -204,6 +227,31 @@ h2 {
 .color-count {
   color: #8f96a6;
   font-size: 11px;
+}
+
+.color-reset {
+  padding: 5px 7px;
+  font-size: 11px;
+}
+
+.alpha-control {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+  color: #8f96a6;
+  font-size: 11px;
+}
+
+.alpha-control input {
+  min-width: 0;
+  accent-color: #9d7bff;
+}
+
+.alpha-control output {
+  color: #c9ced9;
+  text-align: right;
 }
 
 .sources-panel summary {
@@ -238,4 +286,64 @@ h2 {
   color: #c9ced9;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.source-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  border-top: 1px solid #292e39;
+  padding-top: 12px;
+}
+
+.source-editor label {
+  color: #aeb4c3;
+  font-size: 11px;
+}
+
+.source-editor select,
+.source-editor textarea {
+  width: 100%;
+  border: 1px solid #353b48;
+  border-radius: 7px;
+  background: #101218;
+  color: #e8eaf0;
+}
+
+.source-editor select {
+  padding: 7px;
+}
+
+.source-editor textarea {
+  min-height: 220px;
+  resize: vertical;
+  padding: 10px;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  tab-size: 2;
+}
+
+.source-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.remote-failures {
+  margin-top: 10px;
+  color: #ffb0b0;
+  font-size: 11px;
+}
+
+.remote-failures summary {
+  cursor: pointer;
+}
+
+#remote-failure-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.remote-failure {
+  overflow-wrap: anywhere;
 }

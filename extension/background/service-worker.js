@@ -404,8 +404,30 @@ async function handlePanelMessage(message) {
     if (!session?.connected) throw new Error("This tab is not connected.");
     const response = await chrome.tabs.sendMessage(tab.id, message);
     if (!response?.ok) throw new Error(response?.error || "CSS update failed.");
-    session.snapshot = response.snapshot || session.snapshot;
+    session.snapshot = response.snapshot
+      ? {
+          ...response.snapshot,
+          remoteFailures: session.snapshot?.remoteFailures || [],
+        }
+      : session.snapshot;
     sessions.set(tab.id, session);
+    return { ok: true, snapshot: response.snapshot || null };
+  }
+  if (
+    message.type === MESSAGE_TYPES.INSPECT_START ||
+    message.type === MESSAGE_TYPES.INSPECT_STOP
+  ) {
+    const tab =
+      message.type === MESSAGE_TYPES.INSPECT_STOP &&
+      Number.isInteger(message.tabId)
+        ? await chrome.tabs.get(message.tabId)
+        : await activeTab();
+    const session = sessions.get(tab.id);
+    if (!session?.connected) throw new Error("This tab is not connected.");
+    const response = await chrome.tabs.sendMessage(tab.id, message);
+    if (!response?.ok) {
+      throw new Error(response?.error || "Inspector update failed.");
+    }
     return { ok: true };
   }
   if (message.type === MESSAGE_TYPES.DETACH_REQUEST) {
@@ -419,8 +441,9 @@ async function handlePanelMessage(message) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isColorTweakerMessage(message)) return false;
 
-  const task = sender.tab?.id && message.type === MESSAGE_TYPES.SOURCES_CHANGED
-    ? (async () => {
+  let task;
+  if (sender.tab?.id && message.type === MESSAGE_TYPES.SOURCES_CHANGED) {
+    task = (async () => {
         await sessionsReady;
         const session = sessions.get(sender.tab.id);
         if (!session?.desiredAttached) return { ok: false };
@@ -440,8 +463,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await persistSessions();
         broadcastSession(next);
         return { ok: true };
-      })()
-    : handlePanelMessage(message);
+      })();
+  } else if (sender.tab?.id && message.type === MESSAGE_TYPES.INSPECT_RESULT) {
+    task = chrome.runtime
+      .sendMessage(
+        createMessage(MESSAGE_TYPES.INSPECT_RESULT, {
+          tabId: sender.tab.id,
+          candidates: Array.isArray(message.candidates)
+            ? message.candidates
+            : [],
+        }),
+      )
+      .then(() => ({ ok: true }));
+  } else {
+    task = handlePanelMessage(message);
+  }
 
   if (!task) return false;
   Promise.resolve(task)

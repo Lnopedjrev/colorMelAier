@@ -10,9 +10,12 @@
     <main>
       <header>
         <h1><span>Color</span>Tweaker</h1>
-        <span class="phase">Current tab</span>
+        <div class="mode-switch" role="group" aria-label="Editing mode">
+          <button id="mode-tab" class="active" type="button" aria-pressed="true">Current tab</button>
+          <button id="mode-build" type="button" aria-pressed="false">Uploaded build</button>
+        </div>
       </header>
-      <section class="connection-card">
+      <section id="tab-panel" class="connection-card">
         <div class="tab-copy">
           <strong id="tab-title">Active tab</strong>
           <span id="tab-url"></span>
@@ -28,6 +31,20 @@
           <summary>Remote stylesheet errors</summary>
           <div id="remote-failure-list"></div>
         </details>
+      </section>
+      <section id="build-panel" class="build-panel" hidden>
+        <label id="build-drop-zone" class="build-drop-zone" for="build-files-input">
+          <strong>Select a production build folder</strong>
+          <span>HTML, CSS, JavaScript, fonts, and image assets stay local.</span>
+        </label>
+        <input id="build-files-input" type="file" webkitdirectory multiple hidden>
+        <div id="build-file-summary" class="build-file-summary">No build selected.</div>
+        <div class="build-actions">
+          <button id="clear-build" type="button" disabled>Clear</button>
+          <button id="show-build-preview" type="button" disabled>Show preview</button>
+          <button id="load-build" class="primary" type="button" disabled>Load in preview tab</button>
+        </div>
+        <div id="build-status" class="status" aria-live="polite"></div>
       </section>
       <section class="summary" aria-label="Scan summary">
         <span><strong id="source-count">0</strong> sources</span>

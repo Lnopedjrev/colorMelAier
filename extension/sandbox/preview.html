@@ -4,8 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ColorTweaker sandbox preview</title>
+    <style>
+      html,
+      body,
+      #build-preview {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        border: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: #fff;
+      }
+    </style>
   </head>
   <body>
+    <iframe
+      id="build-preview"
+      title="Uploaded build preview"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"
+    ></iframe>
     <script src="preview.js"></script>
   </body>
 </html>

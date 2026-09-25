@@ -31,7 +31,7 @@
   const records = new Map();
   const ownerIds = new WeakMap();
   const sheetIds = new WeakMap();
-  const watchedLinks = new WeakSet();
+  const watchedLinkHrefs = new WeakMap();
   let sequence = 0;
   let observer = null;
   let observedRoots = [];
@@ -51,6 +51,22 @@
       idMap.set(owner, id);
     }
     return id;
+  }
+
+  function absolutizeCssUrls(css, baseUrl) {
+    if (!baseUrl) return css;
+    return css.replace(
+      /url\(\s*(["']?)([^"')]+)\1\s*\)/gi,
+      (match, quote, value) => {
+        const reference = value.trim();
+        if (/^(?:data:|blob:|https?:|#|\/\/)/i.test(reference)) return match;
+        try {
+          return `url("${new URL(reference, baseUrl).href}")`;
+        } catch {
+          return match;
+        }
+      },
+    );
   }
 
   function serializeStyleSheet(sheet, visited = new Set()) {
@@ -83,7 +99,27 @@
     } catch {
       return { text: "", skipped: skipped + 1, readable: false };
     }
-    return { text: chunks.filter(Boolean).join("\n"), skipped, readable: true };
+    return {
+      text: absolutizeCssUrls(
+        chunks.filter(Boolean).join("\n"),
+        sheet.href,
+      ),
+      skipped,
+      readable: true,
+    };
+  }
+
+  function watchStylesheetLoad(link) {
+    const href = link.href;
+    if (watchedLinkHrefs.get(link) === href) return;
+    watchedLinkHrefs.set(link, href);
+    link.addEventListener(
+      "load",
+      () => {
+        if (watchedLinkHrefs.get(link) === href) scheduleFullScan();
+      },
+      { once: true },
+    );
   }
 
   function restoreRecord(record) {
@@ -259,10 +295,7 @@
         { inaccessible },
       );
       context.seen.add(id);
-      if (inaccessible && !watchedLinks.has(link)) {
-        watchedLinks.add(link);
-        link.addEventListener("load", scheduleFullScan, { once: true });
-      }
+      if (inaccessible) watchStylesheetLoad(link);
     }
 
     for (const element of query("[style]")) {

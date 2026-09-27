@@ -7,3 +7,4 @@ vite.config.js
 build-examples/
 .notes/
 .ua/
+extension/README.md

@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "ColorTweaker",
+  "description": "Inspect and adjust colors in the current tab or a sandboxed preview.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "sidePanel",
+    "storage",
+    "tabs"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "file:///*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open ColorTweaker"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'",
+    "sandbox": "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; child-src blob: data:; frame-src blob: data:; worker-src blob:; style-src 'self' 'unsafe-inline' blob:; img-src 'self' data: blob: https: http:; font-src 'self' data: blob: https: http:; media-src 'self' data: blob: https: http:"
+  },
+  "sandbox": {
+    "pages": [
+      "sandbox/preview.html"
+    ]
+  }
+}

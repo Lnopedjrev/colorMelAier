@@ -1,8 +1,8 @@
 :root {
   color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  background: #111318;
-  color: #f1f3f7;
+  font-family: Forum, Georgia, "Times New Roman", serif;
+  background: #17131f;
+  color: #f3f0eb;
 }
 
 html,
@@ -30,20 +30,20 @@ body {
   z-index: 10;
   max-width: min(560px, calc(100vw - 28px));
   transform: translateX(-50%);
-  border: 1px solid #3a4050;
+  border: 1px solid #526d43;
   border-radius: 999px;
-  padding: 8px 13px;
-  background: rgb(24 27 34 / 92%);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 30%);
-  color: #c9ced9;
-  font-size: 12px;
+  padding: 8px 14px;
+  background: rgb(33 27 42 / 94%);
+  box-shadow: 0 8px 24px rgb(8 5 12 / 36%);
+  color: #cfffb2;
+  font-size: 14px;
   text-align: center;
   backdrop-filter: blur(8px);
 }
 
 .preview-status.error {
-  border-color: #8a4040;
-  color: #ffb0b0;
+  border-color: #8a4d58;
+  color: #ffaaa5;
 }
 
 .preview-status[hidden] {

@@ -27,7 +27,7 @@
     "default_path": "sidepanel/index.html"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'",
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com",
     "sandbox": "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; child-src blob: data:; frame-src blob: data:; worker-src blob:; style-src 'self' 'unsafe-inline' blob:; img-src 'self' data: blob: https: http:; font-src 'self' data: blob: https: http:; media-src 'self' data: blob: https: http:"
   },
   "sandbox": {

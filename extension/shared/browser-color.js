@@ -48,7 +48,9 @@ export function createBrowserColorAdapter(documentRef) {
   if (!documentRef?.createElement) {
     throw new TypeError("createBrowserColorAdapter requires a Document");
   }
-  const context = documentRef.createElement("canvas").getContext("2d");
+  const context = documentRef
+    .createElement("canvas")
+    .getContext("2d", { willReadFrequently: true });
 
   function isValidColor(value) {
     if (!value || SKIPPED_COLOR_VALUES.has(value.toLowerCase().trim())) {

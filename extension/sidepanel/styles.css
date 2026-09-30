@@ -129,7 +129,7 @@ h1 span {
 }
 
 button {
-  border: 1px solid var(--line);
+  border: 1px solid #352e3b;
   border-radius: 8px;
   padding: 8px 10px;
   background: var(--surface-soft);
@@ -139,7 +139,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  border-color: #65566f;
+  border-color: #443a4b;
   background: var(--surface-hover);
 }
 
@@ -157,14 +157,38 @@ button:disabled {
 }
 
 button.primary {
-  border-color: var(--green-deep);
+  border-color: #30402c;
   background: #477038;
   color: #f4ffed;
 }
 
 button.primary:hover:not(:disabled) {
-  border-color: var(--green);
+  border-color: #3b5035;
   background: #568745;
+}
+
+#refresh {
+  border-color: #34384c;
+  background: rgb(86 103 190 / 14%);
+  color: #c5ceff;
+}
+
+#refresh:hover:not(:disabled) {
+  border-color: #414760;
+  background: rgb(93 111 207 / 25%);
+  color: #eef0ff;
+}
+
+#detach {
+  border-color: #493139;
+  background: rgb(163 59 77 / 14%);
+  color: #ffb0b6;
+}
+
+#detach:hover:not(:disabled) {
+  border-color: #593a43;
+  background: rgb(177 63 83 / 25%);
+  color: #ffe9eb;
 }
 
 .status {
@@ -244,6 +268,12 @@ button.primary:hover:not(:disabled) {
   padding-block: 10px;
 }
 
+.summary[hidden],
+.panel[hidden],
+.sources-panel[hidden] {
+  display: none;
+}
+
 .summary span {
   display: grid;
   gap: 1px;
@@ -284,7 +314,7 @@ button.primary:hover:not(:disabled) {
 
 .panel-actions button.active,
 .panel-actions button[aria-pressed="true"] {
-  border-color: var(--green-deep);
+  border-color: #34482f;
   background: #35482f;
   color: var(--green-light);
 }

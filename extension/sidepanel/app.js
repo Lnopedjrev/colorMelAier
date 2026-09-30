@@ -70,6 +70,9 @@ const elements = {
   grantAccess: document.getElementById("grant-access"),
   remoteFailures: document.getElementById("remote-failures"),
   remoteFailureList: document.getElementById("remote-failure-list"),
+  scanSummary: document.getElementById("scan-summary"),
+  colorsPanel: document.getElementById("colors-panel"),
+  sourcesPanel: document.getElementById("sources-panel"),
   sourceCount: document.getElementById("source-count"),
   colorCount: document.getElementById("color-count"),
   skippedCount: document.getElementById("skipped-count"),
@@ -505,6 +508,15 @@ function clearEditor(message) {
   elements.colorCount.textContent = "0";
   elements.skippedCount.textContent = "0";
   setEditingControls(false);
+  setResultsVisibility();
+}
+
+function setResultsVisibility(store = null, skipped = 0) {
+  const sourceCount = store?.state.cssSources.length || 0;
+  const colorCount = store?.state.colorEntries.length || 0;
+  elements.scanSummary.hidden = sourceCount === 0 && colorCount === 0 && skipped === 0;
+  elements.colorsPanel.hidden = colorCount === 0;
+  elements.sourcesPanel.hidden = sourceCount === 0;
 }
 
 async function applyStore(store) {
@@ -599,10 +611,13 @@ async function renderSession(session, tab = null) {
   elements.detach.disabled = !session?.desiredAttached;
 
   const snapshot = session?.snapshot;
+  let store = null;
   if (session?.tabId && snapshot) {
-    await reconcileSnapshot(session.tabId, snapshot, activeMode === "tab");
+    store = await reconcileSnapshot(session.tabId, snapshot, activeMode === "tab");
   }
   if (sequence !== renderSequence || activeMode !== "tab") return;
+
+  setResultsVisibility(store, snapshot?.skipped || 0);
 
   if (!session?.connected) clearInspectorUi();
   setEditingControls(Boolean(session?.connected));
@@ -651,6 +666,7 @@ function renderBuildState() {
   elements.sourceCount.textContent = String(buildStore.state.cssSources.length);
   elements.colorCount.textContent = String(buildStore.state.colorEntries.length);
   elements.skippedCount.textContent = "0";
+  setResultsVisibility(buildStore);
 }
 
 async function loadActiveSession() {

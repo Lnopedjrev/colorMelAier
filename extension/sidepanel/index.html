@@ -54,20 +54,72 @@
         <span><strong id="color-count">0</strong> colors</span>
         <span><strong id="skipped-count">0</strong> skipped</span>
       </section>
-      <section id="colors-panel" class="panel" hidden>
-        <div class="panel-heading">
-          <h2>Colors</h2>
-          <div class="panel-actions">
-            <button id="inspect" type="button" aria-pressed="false" disabled>Inspect</button>
-            <button id="frozen-inspect" type="button" aria-pressed="false" disabled>Frozen</button>
-            <button id="export-css" type="button" disabled>Export CSS</button>
-            <button id="reset" type="button" disabled>Reset all</button>
-          </div>
+      <details id="colors-panel" class="panel collapsible-panel" open hidden>
+        <summary class="section-summary">
+          <span>Colors</span>
+          <span
+            class="help-tip"
+            role="img"
+            tabindex="0"
+            aria-label="About the Colors section"
+            data-tooltip="Adjust discovered colors and opacity. Use Inspect or Frozen Inspect to locate a rendered color before editing it."
+          >?</span>
+        </summary>
+        <div class="panel-actions" aria-label="Color tools">
+          <button
+            id="inspect"
+            class="icon-button"
+            type="button"
+            aria-label="Inspect a rendered element's colors"
+            aria-pressed="false"
+            data-tooltip="Inspect a rendered element's colors"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path>
+            </svg>
+          </button>
+          <button
+            id="frozen-inspect"
+            class="icon-button"
+            type="button"
+            aria-label="Inspect without normal page interaction"
+            aria-pressed="false"
+            data-tooltip="Inspect without normal page interaction"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2v20M4.2 6.5l15.6 11M19.8 6.5l-15.6 11M8.5 4l3.5 2 3.5-2M8.5 20l3.5-2 3.5 2M3 10l3 2-3 2M21 10l-3 2 3 2"></path>
+            </svg>
+          </button>
+          <button
+            id="export-css"
+            class="icon-button"
+            type="button"
+            aria-label="Export the processed CSS"
+            data-tooltip="Export the processed CSS"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12M8 11l4 4 4-4M5 20h14"></path>
+            </svg>
+          </button>
+          <button id="reset" type="button" disabled>Reset all</button>
         </div>
         <div id="color-list" class="color-list empty">Attach to a page to scan its colors.</div>
-      </section>
-      <details id="sources-panel" class="sources-panel" hidden>
-        <summary>CSS sources</summary>
+      </details>
+      <details id="sources-panel" class="sources-panel collapsible-panel" hidden>
+        <summary class="section-summary">
+          <span>CSS sources</span>
+          <span
+            class="help-tip"
+            role="img"
+            tabindex="0"
+            aria-label="About the CSS sources section"
+            data-tooltip="Review the stylesheets and inline styles found on the page. Select a source, edit its CSS, and apply the change to the preview."
+          >?</span>
+        </summary>
         <div id="source-list" class="source-list"></div>
         <div class="source-editor">
           <label for="source-select">Edit source</label>

@@ -292,19 +292,12 @@ button.primary:hover:not(:disabled) {
   font-weight: 400;
 }
 
-.panel-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
 .panel-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+  margin: 10px 0 8px;
 }
 
 .panel-actions button {
@@ -319,11 +312,114 @@ button.primary:hover:not(:disabled) {
   color: var(--green-light);
 }
 
-h2 {
-  margin: 0;
+.collapsible-panel {
+  position: relative;
+}
+
+.section-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--green-light);
-  font-size: 20px;
+  cursor: pointer;
+  font-size: 18px;
   font-weight: 400;
+  list-style: none;
+}
+
+.section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.section-summary::before {
+  content: "›";
+  color: var(--green);
+  font-size: 22px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transform-origin: center;
+  transition: transform 120ms ease;
+}
+
+.collapsible-panel[open] > .section-summary::before {
+  transform: rotate(90deg);
+}
+
+.help-tip {
+  display: inline-grid;
+  width: 21px;
+  height: 21px;
+  margin-left: auto;
+  place-items: center;
+  border: 1px solid #3c3543;
+  border-radius: 50%;
+  padding: 0;
+  background: #27212e;
+  color: var(--muted);
+  cursor: help;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+}
+
+.icon-button {
+  position: relative;
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+}
+
+.icon-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: max-content;
+  max-width: min(240px, calc(100vw - 48px));
+  border: 1px solid #443a4b;
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: #15111c;
+  box-shadow: 0 8px 22px rgb(8 5 12 / 34%);
+  color: #e7e1e8;
+  font-family: Forum, Georgia, "Times New Roman", serif;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translateY(3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.help-tip::after {
+  top: calc(100% + 8px);
+  bottom: auto;
 }
 
 .color-list {
@@ -419,13 +515,6 @@ h2 {
 .alpha-control output {
   color: #d8d2da;
   text-align: right;
-}
-
-.sources-panel summary {
-  color: var(--green-light);
-  cursor: pointer;
-  font-size: 17px;
-  font-weight: 400;
 }
 
 .source-list {

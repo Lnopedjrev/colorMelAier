@@ -199,10 +199,24 @@ function updateInspectorButtons() {
   const frozen = inspectorMode === "frozen";
   elements.inspect.classList.toggle("active", inspecting);
   elements.inspect.setAttribute("aria-pressed", String(inspecting));
-  elements.inspect.textContent = inspecting ? "Inspecting…" : "Inspect";
+  elements.inspect.setAttribute(
+    "aria-label",
+    inspecting ? "Stop inspecting colors" : "Inspect a rendered element's colors",
+  );
+  elements.inspect.dataset.tooltip = inspecting
+    ? "Stop inspecting colors"
+    : "Inspect a rendered element's colors";
   elements.frozenInspect.classList.toggle("active", frozen);
   elements.frozenInspect.setAttribute("aria-pressed", String(frozen));
-  elements.frozenInspect.textContent = frozen ? "Frozen…" : "Frozen";
+  elements.frozenInspect.setAttribute(
+    "aria-label",
+    frozen
+      ? "Stop frozen inspection"
+      : "Inspect without normal page interaction",
+  );
+  elements.frozenInspect.dataset.tooltip = frozen
+    ? "Stop frozen inspection"
+    : "Inspect without normal page interaction";
 }
 
 function clearInspectorUi() {
@@ -905,6 +919,18 @@ async function showBuildPreview() {
 
 elements.modeTab.addEventListener("click", () => setMode("tab"));
 elements.modeBuild.addEventListener("click", () => setMode("build"));
+
+for (const helpTip of document.querySelectorAll(".help-tip")) {
+  helpTip.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  helpTip.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+  });
+}
 
 elements.buildFilesInput.addEventListener("change", () => {
   setBuildFiles(

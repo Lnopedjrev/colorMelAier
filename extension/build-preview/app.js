@@ -6,6 +6,7 @@ const TYPES = Object.freeze({
   ERROR: "ct:build-error",
   WARNING: "ct:build-warning",
   SOURCES: "ct:build-sources",
+  LOAD: "ct:sandbox-load-build",
 });
 
 const sessionId = new URL(location.href).searchParams.get("session");
@@ -17,6 +18,7 @@ const channel = sessionId
 const hostInstanceId = crypto.randomUUID();
 let currentTabId = null;
 let sandboxReady = false;
+let buildActive = false;
 let queuedMessages = [];
 
 function showStatus(message, error = false) {
@@ -45,6 +47,7 @@ function flushQueue() {
 
 function resetSandbox() {
   sandboxReady = false;
+  buildActive = false;
   queuedMessages = [];
   showStatus("Waiting for a build from the ColorTweaker side panel…");
   frame.src = "../sandbox/preview.html";
@@ -59,6 +62,9 @@ if (!channel) {
       resetSandbox();
       return;
     }
+    if (event.data.type === TYPES.LOAD && buildActive) {
+      resetSandbox();
+    }
     sendToSandbox(event.data);
   });
 
@@ -68,6 +74,7 @@ if (!channel) {
       sandboxReady = true;
       flushQueue();
     } else if (event.data.type === TYPES.LOADED) {
+      buildActive = true;
       showStatus(`Starting ${event.data.entryPath}…`);
     } else if (event.data.type === TYPES.SOURCES) {
       showStatus("");

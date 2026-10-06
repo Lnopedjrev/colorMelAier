@@ -6,16 +6,9 @@
     LOAD: "ct:sandbox-load-build",
     LOADED: "ct:build-loaded",
     ERROR: "ct:build-error",
-    WARNING: "ct:build-warning",
-    SOURCES: "ct:build-sources",
-    APPLY: "ct:build-apply-updates",
-    INSPECT: "ct:build-inspector",
-    INSPECT_RESULT: "ct:build-inspect-result",
   });
-  const frame = document.getElementById("build-preview");
   let objectUrls = [];
   let activeRequestId = null;
-  let sourceDeadline = null;
 
   function notify(type, payload = {}) {
     parent.postMessage({ type, ...payload }, "*");
@@ -319,7 +312,7 @@
       .join(", ");
   }
 
-  function runtimeBridge() {
+  function runtimeBridge(requestId) {
     "use strict";
 
     const SOURCE_MESSAGE = "ct:build-sources";
@@ -531,7 +524,10 @@
         if (!context.seen.has(id)) records.delete(id);
       }
       installObserver(context.roots);
-      parent.postMessage({ type: SOURCE_MESSAGE, sources: snapshot() }, "*");
+      parent.postMessage(
+        { type: SOURCE_MESSAGE, requestId, sources: snapshot() },
+        "*",
+      );
     }
 
     function applyUpdates(updates) {
@@ -676,7 +672,7 @@
     function sendInspection(element, x, y) {
       const candidates = element ? collectColors(element, x, y) : [];
       clearInspector();
-      parent.postMessage({ type: RESULT_MESSAGE, candidates }, "*");
+      parent.postMessage({ type: RESULT_MESSAGE, requestId, candidates }, "*");
     }
 
     function inspectClick(event) {
@@ -722,10 +718,28 @@
       else if (event.data.type === INSPECT_MESSAGE) setInspector(event.data.mode);
     });
     window.addEventListener("error", (event) => {
-      parent.postMessage({ type: "ct:build-warning", message: event.message || "Build script error." }, "*");
-    });
+      const resource =
+        event.target !== window &&
+        (event.target?.src || event.target?.href || event.target?.currentSrc);
+      const message = resource
+        ? `Failed to load build resource: ${resource}`
+        : event.message || "Build script error.";
+      parent.postMessage(
+        { type: "ct:build-warning", requestId, message },
+        "*",
+      );
+    }, true);
     window.addEventListener("unhandledrejection", (event) => {
-      parent.postMessage({ type: "ct:build-warning", message: String(event.reason || "Unhandled build promise rejection.") }, "*");
+      parent.postMessage(
+        {
+          type: "ct:build-warning",
+          requestId,
+          message: String(
+            event.reason || "Unhandled build promise rejection.",
+          ),
+        },
+        "*",
+      );
     });
     // Do not wait for DOMContentLoaded: deferred/module scripts can keep it
     // pending while the application is starting. The first scan installs an
@@ -737,7 +751,7 @@
     window.addEventListener("load", scanAndSend, { once: true });
   }
 
-  async function transformBuild(fileRecords) {
+  async function transformBuild(fileRecords, requestId) {
     const fileMap = new Map();
     for (const record of fileRecords || []) {
       const path = normalizePath(record.path);
@@ -834,7 +848,9 @@
       );
     }
 
-    for (const element of Array.from(doc.querySelectorAll("[src], [poster], object[data]"))) {
+    for (const element of Array.from(
+      doc.querySelectorAll("[src]:not(script), [poster], object[data]"),
+    )) {
       const attribute = element.hasAttribute("src")
         ? "src"
         : element.hasAttribute("poster")
@@ -858,10 +874,13 @@
     }
 
     for (const script of Array.from(doc.querySelectorAll("script[src]"))) {
-      const path = findExistingPath(script.getAttribute("src"), htmlPath, fileMap);
+      const source = script.getAttribute("src");
+      const path = findExistingPath(source, htmlPath, fileMap);
       if (path && blobMap.has(path)) {
         script.setAttribute("src", blobMap.get(path));
         script.removeAttribute("integrity");
+      } else if (!isExternalReference(source)) {
+        throw new Error(`The build references a missing script: ${source}`);
       }
     }
     for (const script of Array.from(doc.querySelectorAll('script[type="module"]:not([src])'))) {
@@ -912,7 +931,7 @@
     }
 
     const bridge = doc.createElement("script");
-    bridge.textContent = `(${runtimeBridge.toString()})();`;
+    bridge.textContent = `(${runtimeBridge.toString()})(${JSON.stringify(requestId)});`;
     const firstModule = doc.head.querySelector('script[type="module"]');
     if (firstModule) firstModule.before(bridge);
     else doc.head.appendChild(bridge);
@@ -926,30 +945,23 @@
 
   async function loadBuild(message) {
     activeRequestId = message.requestId;
-    clearTimeout(sourceDeadline);
-    sourceDeadline = null;
     clearObjectUrls();
-    frame.removeAttribute("src");
     try {
-      const result = await transformBuild(message.files);
+      const result = await transformBuild(message.files, message.requestId);
       if (activeRequestId !== message.requestId) return;
-      const documentUrl = trackUrl(
-        new Blob([result.html], { type: "text/html" }),
-      );
-      frame.src = documentUrl;
-      sourceDeadline = setTimeout(() => {
-        notify(TYPES.ERROR, {
-          requestId: message.requestId,
-          error:
-            "The build document opened, but its ColorTweaker runtime did not initialize.",
-        });
-      }, 15000);
       notify(TYPES.LOADED, {
         requestId: message.requestId,
         entryPath: result.htmlPath,
         fileCount: result.fileCount,
       });
+      // Replace the controller document instead of loading the build in a
+      // second sandboxed iframe. This keeps generated blob scripts in the
+      // same opaque origin that created them.
+      document.open();
+      document.write(result.html);
+      document.close();
     } catch (error) {
+      clearObjectUrls();
       notify(TYPES.ERROR, {
         requestId: message.requestId,
         error: error.message || String(error),
@@ -958,36 +970,9 @@
   }
 
   window.addEventListener("message", (event) => {
-    if (!event.data?.type) return;
-    if (event.source === parent) {
-      if (event.data.type === TYPES.LOAD) loadBuild(event.data);
-      else if (event.data.type === TYPES.APPLY) {
-        frame.contentWindow?.postMessage(event.data, "*");
-      } else if (event.data.type === TYPES.INSPECT) {
-        frame.contentWindow?.postMessage(event.data, "*");
-      }
-      return;
-    }
-    if (event.source !== frame.contentWindow) return;
-    if (event.data.type === TYPES.SOURCES) {
-      clearTimeout(sourceDeadline);
-      sourceDeadline = null;
-    }
-    if (
-      event.data.type === TYPES.SOURCES ||
-      event.data.type === TYPES.INSPECT_RESULT ||
-      event.data.type === TYPES.WARNING
-    ) {
-      notify(event.data.type, {
-        ...event.data,
-        requestId: activeRequestId,
-      });
-    }
+    if (event.source !== parent || event.data?.type !== TYPES.LOAD) return;
+    loadBuild(event.data);
   });
 
-  window.addEventListener("beforeunload", () => {
-    clearTimeout(sourceDeadline);
-    clearObjectUrls();
-  });
   notify(TYPES.READY);
 })();

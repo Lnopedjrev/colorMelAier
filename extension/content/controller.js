@@ -2,6 +2,13 @@
   "use strict";
 
   if (globalThis.__COLOR_TWEAKER_CONTROLLER__) return;
+  const runtime = globalThis.chrome?.runtime;
+  if (
+    typeof runtime?.sendMessage !== "function" ||
+    typeof runtime?.onMessage?.addListener !== "function"
+  ) {
+    return;
+  }
 
   const TYPES = {
     PING: "ct:ping",
@@ -43,6 +50,16 @@
   let inspectorMode = "off";
   let inspectorStyle = null;
   let frozenOverlay = null;
+
+  function sendRuntimeMessage(message) {
+    try {
+      const pending = runtime.sendMessage(message);
+      pending?.catch?.(() => {});
+    } catch {
+      // An already-injected controller can outlive an extension reload. Its
+      // runtime API is then invalid, so mutation notifications are discarded.
+    }
+  }
 
   function sourceId(owner, prefix, idMap = ownerIds) {
     let id = idMap.get(owner);
@@ -455,9 +472,10 @@
   }
 
   function sendSourcesChanged(nextSnapshot) {
-    chrome.runtime
-      .sendMessage({ type: TYPES.SOURCES_CHANGED, snapshot: nextSnapshot })
-      .catch(() => {});
+    sendRuntimeMessage({
+      type: TYPES.SOURCES_CHANGED,
+      snapshot: nextSnapshot,
+    });
   }
 
   function flushMutations() {
@@ -711,12 +729,10 @@
       ? collectElementColors(element, clientX, clientY)
       : [];
     clearInspector();
-    chrome.runtime
-      .sendMessage({
-        type: TYPES.INSPECT_RESULT,
-        candidates,
-      })
-      .catch(() => {});
+    sendRuntimeMessage({
+      type: TYPES.INSPECT_RESULT,
+      candidates,
+    });
   }
 
   function deepestElementFromPoint(clientX, clientY) {
@@ -801,7 +817,11 @@
       applyingUpdates = false;
     }
     records.clear();
-    chrome.runtime.onMessage.removeListener(handleMessage);
+    try {
+      runtime.onMessage.removeListener(handleMessage);
+    } catch {
+      // The extension may have been reloaded while this controller was active.
+    }
     delete globalThis.__COLOR_TWEAKER_CONTROLLER__;
   }
 
@@ -833,6 +853,6 @@
     }
   }
 
-  chrome.runtime.onMessage.addListener(handleMessage);
+  runtime.onMessage.addListener(handleMessage);
   globalThis.__COLOR_TWEAKER_CONTROLLER__ = { detach };
 })();

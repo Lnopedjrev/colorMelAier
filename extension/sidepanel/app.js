@@ -27,6 +27,9 @@ const parser = createCssParser(colorAdapter);
 const tabStores = new Map();
 const selectedSourceIds = new Map();
 const colorRows = new Map();
+const panelAnimations = new WeakMap();
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let autoScrollFrame = null;
 let activeMode = "tab";
 let activeTab = null;
 let activeSession = null;
@@ -87,6 +90,129 @@ const elements = {
   reloadSource: document.getElementById("reload-source"),
   applySource: document.getElementById("apply-source"),
 };
+
+function clearPanelAnimationStyles(content) {
+  content.style.removeProperty("height");
+  content.style.removeProperty("opacity");
+  content.style.removeProperty("overflow");
+}
+
+function setPanelOpen(panel, open, animate = true) {
+  const content = panel.querySelector(":scope > .collapsible-content");
+  const summary = panel.querySelector(":scope > .section-summary");
+  if (!content || !summary) return Promise.resolve();
+
+  const running = panelAnimations.get(panel);
+  if (running?.target === open) return running.promise;
+  if (!running && panel.dataset.expanded === String(open)) {
+    return Promise.resolve();
+  }
+
+  const startHeight = panel.open ? content.getBoundingClientRect().height : 0;
+  running?.animation.cancel();
+  running?.resolve();
+  panelAnimations.delete(panel);
+
+  if (!panel.open) panel.open = true;
+  panel.dataset.expanded = String(open);
+  summary.setAttribute("aria-expanded", String(open));
+
+  if (!animate || reducedMotion.matches) {
+    panel.open = open;
+    clearPanelAnimationStyles(content);
+    return Promise.resolve();
+  }
+
+  const endHeight = open ? content.scrollHeight : 0;
+  content.style.height = `${startHeight}px`;
+  content.style.overflow = "hidden";
+  const animation = content.animate(
+    [
+      { height: `${startHeight}px`, opacity: startHeight ? 1 : 0 },
+      { height: `${endHeight}px`, opacity: open ? 1 : 0 },
+    ],
+    {
+      duration: open ? 320 : 260,
+      easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+      fill: "forwards",
+    },
+  );
+
+  let resolveAnimation;
+  const promise = new Promise((resolve) => {
+    resolveAnimation = resolve;
+  });
+  const state = {
+    animation,
+    promise,
+    resolve: resolveAnimation,
+    target: open,
+  };
+  panelAnimations.set(panel, state);
+
+  animation.finished
+    .then(() => {
+      if (panelAnimations.get(panel) !== state) return;
+      panelAnimations.delete(panel);
+      animation.cancel();
+      panel.open = open;
+      clearPanelAnimationStyles(content);
+      resolveAnimation();
+    })
+    .catch(() => {});
+  return promise;
+}
+
+function setupCollapsiblePanel(panel) {
+  const summary = panel.querySelector(":scope > .section-summary");
+  if (!summary) return;
+  panel.dataset.expanded = String(panel.open);
+  summary.setAttribute("aria-expanded", String(panel.open));
+  summary.addEventListener("click", (event) => {
+    event.preventDefault();
+    setPanelOpen(panel, panel.dataset.expanded !== "true");
+  });
+}
+
+function cancelAutoScroll() {
+  if (autoScrollFrame !== null) cancelAnimationFrame(autoScrollFrame);
+  autoScrollFrame = null;
+}
+
+function scrollToElement(element) {
+  cancelAutoScroll();
+  const scroller = document.scrollingElement;
+  if (!scroller) return;
+  const start = scroller.scrollTop;
+  const rect = element.getBoundingClientRect();
+  const maximum = Math.max(0, scroller.scrollHeight - window.innerHeight);
+  const target = Math.min(
+    maximum,
+    Math.max(0, start + rect.top - (window.innerHeight - rect.height) / 2),
+  );
+  const distance = target - start;
+  if (reducedMotion.matches || Math.abs(distance) < 2) {
+    scroller.scrollTop = target;
+    return;
+  }
+
+  const duration = Math.min(700, Math.max(380, 320 + Math.abs(distance) * 0.24));
+  const startedAt = performance.now();
+  const step = (now) => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased =
+      progress < 0.5
+        ? 4 * progress ** 3
+        : 1 - (-2 * progress + 2) ** 3 / 2;
+    scroller.scrollTop = start + distance * eased;
+    if (progress < 1) autoScrollFrame = requestAnimationFrame(step);
+    else autoScrollFrame = null;
+  };
+  autoScrollFrame = requestAnimationFrame(step);
+}
+
+window.addEventListener("wheel", cancelAutoScroll, { passive: true });
+window.addEventListener("touchstart", cancelAutoScroll, { passive: true });
 
 function createStore(scope, tabId = null) {
   const state = createColorTweakerState({ cssMode: scope });
@@ -764,15 +890,27 @@ async function selectInspectedColor(candidates) {
       break;
     }
 
-    for (const row of colorRows.values()) row.classList.remove("inspected");
+    for (const row of colorRows.values()) {
+      row.classList.remove("inspected", "inspect-arrival");
+    }
     clearInspectorUi();
     if (!selected) {
       setStatus("The rendered color is not present in the editable CSS sources.", "error");
       return;
     }
+    await setPanelOpen(elements.colorsPanel, true);
     const row = colorRows.get(selected.id);
-    row?.classList.add("inspected");
-    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (row) {
+      row.classList.add("inspected");
+      void row.offsetWidth;
+      row.classList.add("inspect-arrival");
+      row.addEventListener(
+        "animationend",
+        () => row.classList.remove("inspect-arrival"),
+        { once: true },
+      );
+      requestAnimationFrame(() => scrollToElement(row));
+    }
     setStatus(
       `Selected ${selectedCandidate.property}: ${selectedCandidate.color}`,
       "success",
@@ -1200,6 +1338,8 @@ chrome.runtime.onMessage.addListener((message) => {
     .catch((error) => setTabStatus(error.message, "error"));
 });
 
+setupCollapsiblePanel(elements.colorsPanel);
+setupCollapsiblePanel(elements.sourcesPanel);
 updateInspectorButtons();
 renderBuildState();
 loadActiveSession();

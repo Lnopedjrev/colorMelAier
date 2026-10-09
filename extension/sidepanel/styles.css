@@ -22,6 +22,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   min-width: 300px;
   margin: 0;
@@ -316,6 +320,10 @@ button.primary:hover:not(:disabled) {
   position: relative;
 }
 
+.collapsible-content {
+  transform-origin: top;
+}
+
 .section-summary {
   display: flex;
   align-items: center;
@@ -338,10 +346,11 @@ button.primary:hover:not(:disabled) {
   line-height: 1;
   transform: rotate(0deg);
   transform-origin: center;
-  transition: transform 120ms ease;
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.collapsible-panel[open] > .section-summary::before {
+.collapsible-panel[data-expanded="true"] > .section-summary::before,
+.collapsible-panel:not([data-expanded])[open] > .section-summary::before {
   transform: rotate(90deg);
 }
 
@@ -431,8 +440,11 @@ button.primary:hover:not(:disabled) {
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 11px 1px;
+  margin-inline: -8px;
+  border-radius: 8px;
+  padding: 11px 9px;
   border-bottom: 1px solid var(--line-soft);
+  transition: background 240ms ease, box-shadow 240ms ease;
 }
 
 .color-row:last-child {
@@ -440,11 +452,30 @@ button.primary:hover:not(:disabled) {
 }
 
 .color-row.inspected {
-  margin-inline: -8px;
-  border-radius: 8px;
-  padding-inline: 8px;
   background: rgb(91 130 67 / 20%);
   box-shadow: inset 3px 0 var(--green);
+}
+
+.color-row.inspected.inspect-arrival {
+  animation: inspect-arrival 620ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes inspect-arrival {
+  0% {
+    background: rgb(158 232 121 / 38%);
+    box-shadow: inset 5px 0 var(--green), 0 0 0 1px rgb(158 232 121 / 24%);
+    transform: translateX(-5px);
+  }
+
+  55% {
+    transform: translateX(2px);
+  }
+
+  100% {
+    background: rgb(91 130 67 / 20%);
+    box-shadow: inset 3px 0 var(--green);
+    transform: translateX(0);
+  }
 }
 
 .color-row input[type="color"] {
@@ -601,4 +632,12 @@ button.primary:hover:not(:disabled) {
 
 .remote-failure {
   overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section-summary::before,
+  .color-row {
+    animation: none !important;
+    transition: none !important;
+  }
 }

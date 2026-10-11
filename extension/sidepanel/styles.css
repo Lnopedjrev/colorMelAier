@@ -42,7 +42,7 @@ input {
 }
 
 main {
-  padding: 18px;
+  padding: 18px 18px 18px 50px;
 }
 
 header {
@@ -51,6 +51,50 @@ header {
   justify-content: space-between;
   gap: 14px;
   padding-bottom: 4px;
+}
+
+.quick-nav {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  z-index: 25;
+  display: grid;
+  gap: 6px;
+  transform: translateY(-50%);
+}
+
+.quick-nav button {
+  display: inline-grid;
+  width: 32px;
+  height: 34px;
+  place-items: center;
+  border-color: #37303f;
+  border-left: 0;
+  border-radius: 0 7px 7px 0;
+  padding: 0;
+  background: rgb(40 33 49 / 94%);
+  color: #c9c1cc;
+  box-shadow: 3px 4px 10px rgb(8 5 12 / 16%);
+}
+
+.quick-nav button:hover:not(:disabled) {
+  border-color: #4d6243;
+  background: rgb(68 89 56 / 35%);
+  color: var(--green-light);
+}
+
+.quick-nav button:disabled {
+  opacity: 0.3;
+}
+
+.quick-nav svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
 }
 
 h1 {

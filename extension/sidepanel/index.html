@@ -11,13 +11,25 @@
   </head>
   <body>
     <main>
-      <header>
+      <header id="sidepanel-top">
         <h1><span>Color</span>Tweaker</h1>
         <div class="mode-switch" role="group" aria-label="Editing mode">
           <button id="mode-tab" class="active" type="button" aria-pressed="true">Current tab</button>
           <button id="mode-build" type="button" aria-pressed="false">Uploaded build</button>
         </div>
       </header>
+      <nav id="quick-nav" class="quick-nav" aria-label="Side panel sections">
+        <button type="button" data-nav-direction="previous" aria-label="Go to the previous section" title="Previous section">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 15 6-6 6 6"></path>
+          </svg>
+        </button>
+        <button type="button" data-nav-direction="next" aria-label="Go to the next section" title="Next section">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 9 6 6 6-6"></path>
+          </svg>
+        </button>
+      </nav>
       <section id="tab-panel" class="connection-card">
         <div class="tab-copy">
           <strong id="tab-title">Active tab</strong>

@@ -53,6 +53,8 @@ let buildRequestSequence = 0;
 let activeBuildRequestId = null;
 
 const elements = {
+  sidepanelTop: document.getElementById("sidepanel-top"),
+  quickNavButtons: document.querySelectorAll("[data-nav-direction]"),
   modeTab: document.getElementById("mode-tab"),
   modeBuild: document.getElementById("mode-build"),
   tabPanel: document.getElementById("tab-panel"),
@@ -179,17 +181,23 @@ function cancelAutoScroll() {
   autoScrollFrame = null;
 }
 
-function scrollToElement(element) {
+function scrollToElement(element, alignment = "center") {
   cancelAutoScroll();
   const scroller = document.scrollingElement;
   if (!scroller) return;
   const start = scroller.scrollTop;
   const rect = element.getBoundingClientRect();
   const maximum = Math.max(0, scroller.scrollHeight - window.innerHeight);
-  const target = Math.min(
-    maximum,
-    Math.max(0, start + rect.top - (window.innerHeight - rect.height) / 2),
-  );
+  const offset =
+    alignment === "start"
+      ? element === elements.sidepanelTop
+        ? 0
+        : 12
+      : (window.innerHeight - rect.height) / 2;
+  const target =
+    element === elements.sidepanelTop
+      ? 0
+      : Math.min(maximum, Math.max(0, start + rect.top - offset));
   const distance = target - start;
   if (reducedMotion.matches || Math.abs(distance) < 2) {
     scroller.scrollTop = target;
@@ -211,8 +219,63 @@ function scrollToElement(element) {
   autoScrollFrame = requestAnimationFrame(step);
 }
 
+function navigationSections() {
+  const controls = activeMode === "build" ? elements.buildPanel : elements.tabPanel;
+  return [
+    elements.sidepanelTop,
+    controls,
+    elements.colorsPanel,
+    elements.sourcesPanel,
+  ].filter((section) => section && !section.hidden);
+}
+
+function directionalTarget(direction) {
+  const scroller = document.scrollingElement;
+  if (!scroller) return null;
+  const position = scroller.scrollTop;
+  const maximum = Math.max(0, scroller.scrollHeight - window.innerHeight);
+  if (direction === "previous" && position <= 2) return null;
+  if (direction !== "previous" && position >= maximum - 2) return null;
+  const sections = navigationSections().map((element) => ({
+    element,
+    top: position + element.getBoundingClientRect().top,
+  }));
+  if (direction === "previous") {
+    return (
+      sections.reverse().find((section) => section.top < position - 24)
+        ?.element || null
+    );
+  }
+  return sections.find((section) => section.top > position + 24)?.element || null;
+}
+
+function updateQuickNav() {
+  for (const button of elements.quickNavButtons) {
+    button.disabled = !directionalTarget(button.dataset.navDirection);
+  }
+}
+
+async function navigateToSection(direction) {
+  const target = directionalTarget(direction);
+  if (!target) return;
+  if (target.matches(".collapsible-panel")) {
+    await setPanelOpen(target, true);
+  }
+  scrollToElement(target, "start");
+}
+
+let quickNavUpdateFrame = null;
+function scheduleQuickNavUpdate() {
+  if (quickNavUpdateFrame !== null) return;
+  quickNavUpdateFrame = requestAnimationFrame(() => {
+    quickNavUpdateFrame = null;
+    updateQuickNav();
+  });
+}
+
 window.addEventListener("wheel", cancelAutoScroll, { passive: true });
 window.addEventListener("touchstart", cancelAutoScroll, { passive: true });
+window.addEventListener("scroll", scheduleQuickNavUpdate, { passive: true });
 
 function createStore(scope, tabId = null) {
   const state = createColorTweakerState({ cssMode: scope });
@@ -657,6 +720,7 @@ function setResultsVisibility(store = null, skipped = 0) {
   elements.scanSummary.hidden = sourceCount === 0 && colorCount === 0 && skipped === 0;
   elements.colorsPanel.hidden = colorCount === 0;
   elements.sourcesPanel.hidden = sourceCount === 0;
+  updateQuickNav();
 }
 
 async function applyStore(store) {
@@ -1340,6 +1404,12 @@ chrome.runtime.onMessage.addListener((message) => {
 
 setupCollapsiblePanel(elements.colorsPanel);
 setupCollapsiblePanel(elements.sourcesPanel);
+for (const button of elements.quickNavButtons) {
+  button.addEventListener("click", () => {
+    navigateToSection(button.dataset.navDirection);
+  });
+}
+updateQuickNav();
 updateInspectorButtons();
 renderBuildState();
 loadActiveSession();

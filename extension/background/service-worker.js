@@ -5,6 +5,7 @@ import {
 } from "../shared/messages.js";
 
 const SESSION_STORAGE_KEY = "colorTweakerTabSessions";
+const FRAME_SOURCE_ID_RE = /^frame-(\d+)-([^:]+):(.*)$/s;
 const sessions = new Map();
 let persistQueue = Promise.resolve();
 
@@ -108,6 +109,39 @@ function originPattern(urlString) {
   }
 }
 
+function externalSourceId(frameId, documentId, sourceId) {
+  return `frame-${frameId}-${documentId || "current"}:${sourceId}`;
+}
+
+function sourceDocumentId(frameId, documentId) {
+  return frameId === 0 ? "top" : documentId || "current";
+}
+
+function localSourceIdentity(sourceId) {
+  const match = FRAME_SOURCE_ID_RE.exec(String(sourceId));
+  return match
+    ? {
+        frameId: Number(match[1]),
+        documentId: match[2],
+        sourceId: match[3],
+      }
+    : null;
+}
+
+function remoteFailure(error, href, extra = {}) {
+  const status = Number.isInteger(error?.status) ? error.status : null;
+  let kind = "network";
+  if (status === 401 || status === 403) kind = "authentication";
+  else if (status !== null) kind = "http";
+  return {
+    href,
+    error: error?.message || "The stylesheet could not be loaded.",
+    kind,
+    status,
+    ...extra,
+  };
+}
+
 async function hasFetchAccess(resourceUrl, pageUrl) {
   try {
     if (new URL(resourceUrl).origin === new URL(pageUrl).origin) return true;
@@ -181,14 +215,23 @@ function wrapImportedCss(css, condition) {
   return wrapped;
 }
 
-async function fetchStylesheet(url, pageUrl, visited = new Set()) {
+async function fetchStylesheet(
+  url,
+  pageUrl,
+  visited = new Set(),
+  diagnostics = { failures: [], permissionRequired: [] },
+) {
   const normalized = new URL(url).href;
   if (visited.has(normalized)) return "";
   visited.add(normalized);
 
   const response = await fetch(normalized, { credentials: "include" });
   if (!response.ok) {
-    throw new Error(`Stylesheet request failed with HTTP ${response.status}.`);
+    const error = new Error(
+      `Stylesheet request failed with HTTP ${response.status}.`,
+    );
+    error.status = response.status;
+    throw error;
   }
   const css = await response.text();
   const importRe = /@import\s+(?:url\(\s*)?["']?([^"'\)\s]+)["']?\s*\)?\s*([^;]*);/gi;
@@ -207,14 +250,26 @@ async function fetchStylesheet(url, pageUrl, visited = new Set()) {
       continue;
     }
     if (!(await hasFetchAccess(importedUrl, pageUrl))) {
+      diagnostics.permissionRequired.push({
+        href: importedUrl,
+        importedBy: normalized,
+      });
       expanded += `@import url("${importedUrl}") ${match[2] || ""};`;
       continue;
     }
     try {
-      const imported = await fetchStylesheet(importedUrl, pageUrl, visited);
+      const imported = await fetchStylesheet(
+        importedUrl,
+        pageUrl,
+        visited,
+        diagnostics,
+      );
       const condition = (match[2] || "").trim();
       expanded += condition ? wrapImportedCss(imported, condition) : imported;
-    } catch {
+    } catch (error) {
+      diagnostics.failures.push(
+        remoteFailure(error, importedUrl, { importedBy: normalized }),
+      );
       expanded += `@import url("${importedUrl}") ${match[2] || ""};`;
     }
   }
@@ -222,20 +277,36 @@ async function fetchStylesheet(url, pageUrl, visited = new Set()) {
   return absolutizeCssUrls(expanded, normalized);
 }
 
-async function enrichRemoteSources(tab, currentSnapshot) {
+async function enrichFrameSnapshot(tab, frame, currentSnapshot) {
   let nextSnapshot = currentSnapshot;
   const loaded = [];
   const failures = [];
+  const permissionRequired = [];
   for (const source of currentSnapshot?.unreadableStylesheets || []) {
-    if (!(await hasFetchAccess(source.href, tab.url))) continue;
+    if (!(await hasFetchAccess(source.href, frame.url || tab.url))) continue;
     try {
+      const diagnostics = { failures: [], permissionRequired: [] };
       loaded.push({
         id: source.id,
         href: source.href,
-        text: await fetchStylesheet(source.href, tab.url),
+        text: await fetchStylesheet(
+          source.href,
+          frame.url || tab.url,
+          new Set(),
+          diagnostics,
+        ),
       });
+      failures.push(
+        ...diagnostics.failures.map((failure) => ({
+          ...failure,
+          sourceId: source.id,
+        })),
+      );
+      permissionRequired.push(...diagnostics.permissionRequired);
     } catch (error) {
-      failures.push({ id: source.id, href: source.href, error: error.message });
+      failures.push(
+        remoteFailure(error, source.href, { sourceId: source.id }),
+      );
     }
   }
   if (loaded.length) {
@@ -244,36 +315,148 @@ async function enrichRemoteSources(tab, currentSnapshot) {
       createMessage(MESSAGE_TYPES.REGISTER_REMOTE_SOURCES, {
         sources: loaded,
       }),
+      { frameId: frame.frameId },
     );
     if (response?.ok && response.snapshot) nextSnapshot = response.snapshot;
   }
-  return { ...nextSnapshot, remoteFailures: failures };
+  return {
+    frameId: frame.frameId,
+    documentId: sourceDocumentId(frame.frameId, frame.documentId),
+    url: frame.url || tab.url || "",
+    snapshot: nextSnapshot,
+    remoteFailures: failures,
+    permissionRequired,
+  };
 }
 
-async function scanTab(tab) {
+function namespaceFrameSnapshot(frameData, order) {
+  const frameId = frameData.frameId;
+  const documentId = frameData.documentId || "current";
+  const frameName = frameId === 0 ? "" : `[frame ${frameId}] `;
+  return {
+    sources: (frameData.snapshot?.sources || []).map((source) => ({
+      ...source,
+      id: externalSourceId(frameId, documentId, source.id),
+      name: `${frameName}${source.name}`,
+      order: order.value++,
+    })),
+    unreadableStylesheets: (
+      frameData.snapshot?.unreadableStylesheets || []
+    ).map((source) => ({
+      ...source,
+      id: externalSourceId(frameId, documentId, source.id),
+      name: `${frameName}${source.name}`,
+      frameId,
+      frameUrl: frameData.url,
+    })),
+    permissionRequired: (frameData.permissionRequired || []).map((item) => ({
+      ...item,
+      frameId,
+      frameUrl: frameData.url,
+    })),
+    remoteFailures: (frameData.remoteFailures || []).map((failure) => ({
+      ...failure,
+      id: failure.sourceId
+        ? externalSourceId(frameId, documentId, failure.sourceId)
+        : null,
+      frameId,
+      frameUrl: frameData.url,
+    })),
+  };
+}
+
+function aggregateFrameSnapshots(frameSnapshots, inaccessibleFrames = []) {
+  const result = {
+    sources: [],
+    skipped: 0,
+    unreadableStylesheets: [],
+    permissionRequired: [],
+    inaccessibleFrames,
+    remoteFailures: inaccessibleFrames.map((frame) => ({
+      href: frame.url,
+      error: frame.error,
+      kind: "frame-access",
+      frameId: frame.frameId,
+      frameUrl: frame.url,
+    })),
+  };
+  const order = { value: 0 };
+  for (const frameData of Array.from(frameSnapshots.values()).sort(
+    (left, right) => left.frameId - right.frameId,
+  )) {
+    const namespaced = namespaceFrameSnapshot(frameData, order);
+    result.sources.push(...namespaced.sources);
+    result.unreadableStylesheets.push(...namespaced.unreadableStylesheets);
+    result.permissionRequired.push(...namespaced.permissionRequired);
+    result.remoteFailures.push(...namespaced.remoteFailures);
+    result.skipped += frameData.snapshot?.skipped || 0;
+  }
+  return result;
+}
+
+async function scanFrame(tab, frame) {
   const response = await chrome.tabs.sendMessage(
     tab.id,
     createMessage(MESSAGE_TYPES.SCAN_REQUEST),
+    { frameId: frame.frameId },
   );
   if (!response?.ok || !response.snapshot) {
     throw new Error(response?.error || "The page controller did not return CSS sources.");
   }
-  return enrichRemoteSources(tab, response.snapshot);
+  return enrichFrameSnapshot(tab, frame, response.snapshot);
 }
 
-async function injectController(tabId) {
+async function injectController(tabId, frameId) {
+  const target = { tabId, frameIds: [frameId] };
   await chrome.scripting.executeScript({
-    target: { tabId },
+    target,
+    world: "MAIN",
+    files: ["content/page-hooks.js"],
+  });
+  await chrome.scripting.executeScript({
+    target,
     files: ["content/controller.js"],
   });
+}
+
+async function tabFrames(tab) {
+  const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+  return frames?.length
+    ? frames
+    : [{ frameId: 0, parentFrameId: -1, url: tab.url || "" }];
+}
+
+async function scanTab(tab) {
+  const frameSnapshots = new Map();
+  const inaccessibleFrames = [];
+  const frames = await tabFrames(tab);
+  for (const frame of frames) {
+    try {
+      await injectController(tab.id, frame.frameId);
+      frameSnapshots.set(frame.frameId, await scanFrame(tab, frame));
+    } catch (error) {
+      if (frame.frameId === 0) throw error;
+      inaccessibleFrames.push({
+        frameId: frame.frameId,
+        url: frame.url || "",
+        error:
+          error.message ||
+          "Chrome did not allow ColorTweaker to inspect this frame.",
+      });
+    }
+  }
+  return {
+    frameSnapshots,
+    inaccessibleFrames,
+    snapshot: aggregateFrameSnapshots(frameSnapshots, inaccessibleFrames),
+  };
 }
 
 async function connectTab(tab, desiredAttached = true) {
   const support = supportedPage(tab.url || "");
   if (!support.supported) throw new Error(support.reason);
   try {
-    await injectController(tab.id);
-    const nextSnapshot = await scanTab(tab);
+    const scan = await scanTab(tab);
     const session = {
       tabId: tab.id,
       title: tab.title || "",
@@ -282,7 +465,9 @@ async function connectTab(tab, desiredAttached = true) {
       connected: true,
       needsReattach: false,
       error: "",
-      snapshot: nextSnapshot,
+      snapshot: scan.snapshot,
+      frameSnapshots: scan.frameSnapshots,
+      inaccessibleFrames: scan.inaccessibleFrames,
     };
     sessions.set(tab.id, session);
     await persistSessions();
@@ -316,9 +501,10 @@ async function reconcileTabSession(tab) {
     const response = await chrome.tabs.sendMessage(
       tab.id,
       createMessage(MESSAGE_TYPES.PING),
+      { frameId: 0 },
     );
     if (response?.ok) {
-      const nextSnapshot = await scanTab(tab);
+      const scan = await scanTab(tab);
       session = {
         ...session,
         title: tab.title || "",
@@ -326,7 +512,9 @@ async function reconcileTabSession(tab) {
         connected: true,
         needsReattach: false,
         error: "",
-        snapshot: nextSnapshot,
+        snapshot: scan.snapshot,
+        frameSnapshots: scan.frameSnapshots,
+        inaccessibleFrames: scan.inaccessibleFrames,
       };
       sessions.set(tab.id, session);
     }
@@ -357,18 +545,84 @@ async function getActiveSession() {
 }
 
 async function detachTab(tabId) {
-  try {
-    await chrome.tabs.sendMessage(
-      tabId,
-      createMessage(MESSAGE_TYPES.DETACH_REQUEST),
-    );
-  } catch {
-    // Navigation may already have destroyed the controller and its DOM.
-  }
+  const session = sessions.get(tabId);
+  const frameIds = session?.frameSnapshots?.size
+    ? Array.from(session.frameSnapshots.keys())
+    : [0];
+  await Promise.allSettled(
+    frameIds.map((frameId) =>
+      chrome.tabs.sendMessage(
+        tabId,
+        createMessage(MESSAGE_TYPES.DETACH_REQUEST),
+        { frameId },
+      ),
+    ),
+  );
   sessions.delete(tabId);
   await chrome.storage.session.remove(`colorTweakerEdits:${tabId}`);
   await persistSessions();
   broadcastSession(null);
+}
+
+async function applyUpdatesToFrames(tab, session, updates) {
+  const updatesByFrame = new Map();
+  for (const update of updates || []) {
+    const identity = localSourceIdentity(update?.id);
+    if (!identity) continue;
+    const currentDocumentId =
+      session.frameSnapshots?.get(identity.frameId)?.documentId || "current";
+    if (identity.documentId !== currentDocumentId) continue;
+    if (!updatesByFrame.has(identity.frameId)) {
+      updatesByFrame.set(identity.frameId, []);
+    }
+    updatesByFrame.get(identity.frameId).push({
+      ...update,
+      id: identity.sourceId,
+    });
+  }
+
+  for (const [frameId, frameUpdates] of updatesByFrame) {
+    const response = await chrome.tabs.sendMessage(
+      tab.id,
+      createMessage(MESSAGE_TYPES.APPLY_SOURCE_UPDATES, {
+        updates: frameUpdates,
+      }),
+      { frameId },
+    );
+    if (!response?.ok || !response.snapshot) {
+      throw new Error(response?.error || `CSS update failed in frame ${frameId}.`);
+    }
+    const previous = session.frameSnapshots?.get(frameId);
+    if (previous) {
+      session.frameSnapshots.set(frameId, {
+        ...previous,
+        snapshot: response.snapshot,
+      });
+    }
+  }
+
+  session.snapshot = aggregateFrameSnapshots(
+    session.frameSnapshots || new Map(),
+    session.inaccessibleFrames || [],
+  );
+  return session.snapshot;
+}
+
+async function setInspectorInFrames(tabId, session, message) {
+  const frameIds = session.frameSnapshots?.size
+    ? Array.from(session.frameSnapshots.keys())
+    : [0];
+  const results = await Promise.allSettled(
+    frameIds.map((frameId) =>
+      chrome.tabs.sendMessage(tabId, message, { frameId }),
+    ),
+  );
+  const topFrameIndex = frameIds.indexOf(0);
+  const topFrameResult = results[topFrameIndex >= 0 ? topFrameIndex : 0];
+  if (topFrameResult?.status === "rejected") throw topFrameResult.reason;
+  if (topFrameResult?.value && !topFrameResult.value.ok) {
+    throw new Error(topFrameResult.value.error || "Inspector update failed.");
+  }
 }
 
 async function handlePanelMessage(message) {
@@ -384,6 +638,7 @@ async function handlePanelMessage(message) {
     const tab = await activeTab();
     const session = sessions.get(tab.id);
     if (!session?.desiredAttached) throw new Error("This tab is not attached.");
+    const scan = await scanTab(tab);
     const next = {
       ...session,
       title: tab.title || "",
@@ -391,7 +646,9 @@ async function handlePanelMessage(message) {
       connected: true,
       needsReattach: false,
       error: "",
-      snapshot: await scanTab(tab),
+      snapshot: scan.snapshot,
+      frameSnapshots: scan.frameSnapshots,
+      inaccessibleFrames: scan.inaccessibleFrames,
     };
     sessions.set(tab.id, next);
     await persistSessions();
@@ -402,16 +659,13 @@ async function handlePanelMessage(message) {
     const tab = await activeTab();
     const session = sessions.get(tab.id);
     if (!session?.connected) throw new Error("This tab is not connected.");
-    const response = await chrome.tabs.sendMessage(tab.id, message);
-    if (!response?.ok) throw new Error(response?.error || "CSS update failed.");
-    session.snapshot = response.snapshot
-      ? {
-          ...response.snapshot,
-          remoteFailures: session.snapshot?.remoteFailures || [],
-        }
-      : session.snapshot;
+    const nextSnapshot = await applyUpdatesToFrames(
+      tab,
+      session,
+      message.updates,
+    );
     sessions.set(tab.id, session);
-    return { ok: true, snapshot: response.snapshot || null };
+    return { ok: true, snapshot: nextSnapshot };
   }
   if (
     message.type === MESSAGE_TYPES.INSPECT_START ||
@@ -424,10 +678,7 @@ async function handlePanelMessage(message) {
         : await activeTab();
     const session = sessions.get(tab.id);
     if (!session?.connected) throw new Error("This tab is not connected.");
-    const response = await chrome.tabs.sendMessage(tab.id, message);
-    if (!response?.ok) {
-      throw new Error(response?.error || "Inspector update failed.");
-    }
+    await setInspectorInFrames(tab.id, session, message);
     return { ok: true };
   }
   if (message.type === MESSAGE_TYPES.DETACH_REQUEST) {
@@ -447,17 +698,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await sessionsReady;
         const session = sessions.get(sender.tab.id);
         if (!session?.desiredAttached) return { ok: false };
-        const nextSnapshot = await enrichRemoteSources(
-          sender.tab,
-          message.snapshot,
-        );
+        if (message.rescanFrames || !(session.frameSnapshots instanceof Map)) {
+          const scan = await scanTab(sender.tab);
+          session.frameSnapshots = scan.frameSnapshots;
+          session.inaccessibleFrames = scan.inaccessibleFrames;
+          session.snapshot = scan.snapshot;
+        } else {
+          const frameId = sender.frameId ?? 0;
+          const frameData = await enrichFrameSnapshot(
+            sender.tab,
+            {
+              frameId,
+              documentId: sender.documentId || "current",
+              url: sender.url || sender.tab.url || "",
+            },
+            message.snapshot,
+          );
+          session.frameSnapshots.set(frameId, frameData);
+          session.inaccessibleFrames = (
+            session.inaccessibleFrames || []
+          ).filter((frame) => frame.frameId !== frameId);
+          session.snapshot = aggregateFrameSnapshots(
+            session.frameSnapshots,
+            session.inaccessibleFrames,
+          );
+        }
         const next = {
           ...session,
           title: sender.tab.title || session.title,
           url: sender.tab.url || session.url,
           connected: true,
           error: "",
-          snapshot: nextSnapshot,
         };
         sessions.set(sender.tab.id, next);
         await persistSessions();
@@ -499,6 +770,83 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   } catch {
     broadcastSession(session);
   }
+});
+
+async function prepareCommittedFrame(details) {
+  if (details.frameId === 0) return;
+  await sessionsReady;
+  const session = sessions.get(details.tabId);
+  if (!session?.desiredAttached) return;
+  session.frameSnapshots?.delete(details.frameId);
+  session.inaccessibleFrames = (session.inaccessibleFrames || []).filter(
+    (frame) => frame.frameId !== details.frameId,
+  );
+  try {
+    await injectController(details.tabId, details.frameId);
+  } catch (error) {
+    session.inaccessibleFrames.push({
+      frameId: details.frameId,
+      url: details.url || "",
+      error:
+        error.message ||
+        "Chrome did not allow ColorTweaker to inspect this frame.",
+    });
+  }
+  session.snapshot = aggregateFrameSnapshots(
+    session.frameSnapshots || new Map(),
+    session.inaccessibleFrames,
+  );
+  sessions.set(details.tabId, session);
+}
+
+async function scanCommittedFrame(details) {
+  if (details.frameId === 0) return;
+  await sessionsReady;
+  const session = sessions.get(details.tabId);
+  if (!session?.desiredAttached) return;
+  try {
+    const tab = await chrome.tabs.get(details.tabId);
+    await injectController(details.tabId, details.frameId);
+    if (!(session.frameSnapshots instanceof Map)) session.frameSnapshots = new Map();
+    session.frameSnapshots.set(
+      details.frameId,
+      await scanFrame(tab, {
+        frameId: details.frameId,
+        documentId: details.documentId || "current",
+        url: details.url || "",
+      }),
+    );
+    session.inaccessibleFrames = (session.inaccessibleFrames || []).filter(
+      (frame) => frame.frameId !== details.frameId,
+    );
+  } catch (error) {
+    session.frameSnapshots?.delete(details.frameId);
+    session.inaccessibleFrames = (session.inaccessibleFrames || []).filter(
+      (frame) => frame.frameId !== details.frameId,
+    );
+    session.inaccessibleFrames.push({
+      frameId: details.frameId,
+      url: details.url || "",
+      error:
+        error.message ||
+        "Chrome did not allow ColorTweaker to inspect this frame.",
+    });
+  }
+  session.snapshot = aggregateFrameSnapshots(
+    session.frameSnapshots || new Map(),
+    session.inaccessibleFrames,
+  );
+  sessions.set(details.tabId, session);
+  await persistSessions();
+  broadcastSession(session);
+}
+
+chrome.webNavigation.onCommitted.addListener((details) => {
+  prepareCommittedFrame(details).catch(() => {});
+});
+
+chrome.webNavigation.onDOMContentLoaded.addListener((details) => {
+  scanCommittedFrame(details).catch(() => {});
 });
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {

@@ -131,7 +131,7 @@
   }
 
   function watchStylesheetLoad(link) {
-    const href = link.href;
+    const href = linkedStylesheetHref(link);
     if (watchedLinkHrefs.get(link) === href) return;
     watchedLinkHrefs.set(link, href);
     link.addEventListener(
@@ -141,6 +141,10 @@
       },
       { once: true },
     );
+  }
+
+  function linkedStylesheetHref(link) {
+    return link.sheet?.href || link.href;
   }
 
   function restoreRecord(record) {
@@ -301,6 +305,7 @@
       const id = sourceId(link, "linked");
       const serialized = serializeStyleSheet(link.sheet);
       const inaccessible = !serialized.readable;
+      const href = linkedStylesheetHref(link);
       context.skipped += serialized.skipped;
       const previous = records.get(id);
       mergeRecord(
@@ -309,7 +314,7 @@
           name: link.getAttribute("href") || id,
           kind: "linked",
           order: context.order++,
-          href: link.href,
+          href,
         },
         link,
         inaccessible ? previous?.remoteText || "" : serialized.text,

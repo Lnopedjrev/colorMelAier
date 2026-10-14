@@ -316,6 +316,7 @@
     "use strict";
 
     const SOURCE_MESSAGE = "ct:build-sources";
+    const SOURCE_REQUEST_MESSAGE = "ct:build-sources-request";
     const APPLY_MESSAGE = "ct:build-apply-updates";
     const INSPECT_MESSAGE = "ct:build-inspector";
     const RESULT_MESSAGE = "ct:build-inspect-result";
@@ -478,14 +479,27 @@
       }
     }
 
-    function snapshot() {
+    function currentRecordText(record) {
+      if (record.kind === "attribute") {
+        return record.owner?.getAttribute?.("style") ?? record.baseText;
+      }
+      if (record.kind === "adopted") {
+        return record.owner ? serializeSheet(record.owner) : record.baseText;
+      }
+      if (record.kind === "linked") {
+        return record.patch ? record.patch.textContent || "" : record.baseText;
+      }
+      return record.owner?.textContent ?? record.lastAppliedText ?? record.baseText;
+    }
+
+    function snapshot(useCurrentText = false) {
       return Array.from(records.values())
         .sort((left, right) => left.order - right.order)
         .map((record) => ({
           id: record.id,
           name: record.name,
           kind: record.kind,
-          text: record.baseText,
+          text: useCurrentText ? currentRecordText(record) : record.baseText,
           order: record.order,
           href: record.href || null,
         }));
@@ -716,6 +730,12 @@
       if (event.source !== parent || !event.data) return;
       if (event.data.type === APPLY_MESSAGE) applyUpdates(event.data.updates);
       else if (event.data.type === INSPECT_MESSAGE) setInspector(event.data.mode);
+      else if (event.data.type === SOURCE_REQUEST_MESSAGE) {
+        parent.postMessage(
+          { type: SOURCE_MESSAGE, requestId, sources: snapshot(true) },
+          "*",
+        );
+      }
     });
     window.addEventListener("error", (event) => {
       const resource =

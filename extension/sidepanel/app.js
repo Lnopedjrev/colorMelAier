@@ -10,6 +10,8 @@ import {
 
 const SANDBOX_TYPES = Object.freeze({
   HOST_READY: "ct:build-preview-host-ready",
+  STATE_REQUEST: "ct:build-preview-state-request",
+  SOURCES_REQUEST: "ct:build-sources-request",
   CLEAR: "ct:build-preview-clear",
   READY: "ct:sandbox-ready",
   LOAD: "ct:sandbox-load-build",
@@ -33,8 +35,8 @@ let activeSession = null;
 let inspectorMode = "off";
 let renderSequence = 0;
 let applyTimer = null;
-const buildPreviewSessionId = crypto.randomUUID();
-const buildPreviewChannel = new BroadcastChannel(
+let buildPreviewSessionId = crypto.randomUUID();
+let buildPreviewChannel = new BroadcastChannel(
   `ct-build-preview:${buildPreviewSessionId}`,
 );
 const previewReadyWaiters = new Set();
@@ -48,6 +50,8 @@ let buildName = "uploaded-build";
 const buildSourceOverrides = new Map();
 let buildRequestSequence = 0;
 let activeBuildRequestId = null;
+let recoveringBuildPreview = false;
+let recoveredPreviewWasActive = false;
 
 const elements = {
   modeTab: document.getElementById("mode-tab"),
@@ -96,7 +100,13 @@ function createStore(scope, tabId = null) {
     extractAlpha: colorAdapter.extractAlpha,
     hexToRgba: colorAdapter.hexToRgba,
   });
-  return { scope, tabId, state, sourceStore };
+  return {
+    scope,
+    tabId,
+    state,
+    sourceStore,
+    applyQueue: Promise.resolve(),
+  };
 }
 
 const buildStore = createStore("build");
@@ -227,6 +237,38 @@ function clearInspectorUi() {
 function postToBuildPreview(type, payload = {}) {
   if (!previewReady) throw new Error("The build preview tab is not ready.");
   buildPreviewChannel.postMessage({ type, ...payload });
+}
+
+function connectBuildPreviewSession(sessionId) {
+  if (!sessionId || sessionId === buildPreviewSessionId) return;
+  buildPreviewChannel.close();
+  buildPreviewSessionId = sessionId;
+  buildPreviewChannel = new BroadcastChannel(`ct-build-preview:${sessionId}`);
+  buildPreviewChannel.addEventListener("message", handleBuildPreviewMessage);
+}
+
+async function recoverBuildPreview() {
+  const previewUrl = chrome.runtime.getURL("build-preview/index.html");
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  const candidates = tabs
+    .filter((tab) => tab.url?.startsWith(previewUrl))
+    .sort(
+      (left, right) =>
+        Number(Boolean(right.active)) - Number(Boolean(left.active)) ||
+        (right.lastAccessed || 0) - (left.lastAccessed || 0),
+    );
+  const tab = candidates[0];
+  if (!Number.isInteger(tab?.id)) return;
+
+  const sessionId = new URL(tab.url).searchParams.get("session");
+  if (!sessionId) return;
+
+  connectBuildPreviewSession(sessionId);
+  previewTabId = tab.id;
+  previewReady = false;
+  recoveringBuildPreview = true;
+  recoveredPreviewWasActive = Boolean(tab.active);
+  buildPreviewChannel.postMessage({ type: SANDBOX_TYPES.STATE_REQUEST });
 }
 
 function markPreviewReady() {
@@ -543,7 +585,7 @@ function setResultsVisibility(store = null, skipped = 0) {
   elements.sourcesPanel.hidden = sourceCount === 0;
 }
 
-async function applyStore(store) {
+async function applyStoreNow(store) {
   if (!storeIsEditable(store)) return;
   try {
     const updates = store.sourceStore.getCssSourceUpdates();
@@ -568,6 +610,13 @@ async function applyStore(store) {
   } catch (error) {
     setStatus(error.message, "error");
   }
+}
+
+function applyStore(store) {
+  store.applyQueue = store.applyQueue
+    .catch(() => {})
+    .then(() => applyStoreNow(store));
+  return store.applyQueue;
 }
 
 function scheduleApply(store) {
@@ -1020,6 +1069,8 @@ elements.frozenInspect.addEventListener("click", () => toggleInspector("frozen")
 elements.reset.addEventListener("click", async () => {
   const store = await activeStore();
   if (!store) return;
+  clearTimeout(applyTimer);
+  applyTimer = null;
   store.state.replacements.clear();
   store.state.alphaOverrides.clear();
   if (store.scope === "tab") {
@@ -1113,7 +1164,7 @@ elements.grantAccess.addEventListener("click", async () => {
   }
 });
 
-buildPreviewChannel.addEventListener("message", (event) => {
+function handleBuildPreviewMessage(event) {
   if (!event.data?.type) return;
   if (
     event.data.type === SANDBOX_TYPES.HOST_READY ||
@@ -1126,6 +1177,24 @@ buildPreviewChannel.addEventListener("message", (event) => {
       previewHostInstanceId = event.data.hostInstanceId || previewHostInstanceId;
       if (Number.isInteger(event.data.tabId)) previewTabId = event.data.tabId;
       markPreviewReady();
+      if (recoveringBuildPreview) {
+        if (event.data.buildActive && Number.isInteger(event.data.requestId)) {
+          activeBuildRequestId = event.data.requestId;
+          buildRequestSequence = Math.max(buildRequestSequence, event.data.requestId);
+          buildName = event.data.entryPath
+            ? event.data.entryPath.split("/").pop().replace(/\.html?$/i, "") || buildName
+            : buildName;
+          elements.buildFileSummary.textContent =
+            "Using the build already open in the preview tab.";
+          elements.clearBuild.disabled = false;
+          elements.showBuildPreview.disabled = false;
+          setBuildStatus("Restoring build sources from the preview tab…");
+          postToBuildPreview(SANDBOX_TYPES.SOURCES_REQUEST);
+        } else {
+          recoveringBuildPreview = false;
+          recoveredPreviewWasActive = false;
+        }
+      }
       if (replacedHost && buildLoaded && buildFiles.length && !previewReloading) {
         previewReloading = true;
         loadSelectedBuild({ preserveEdits: true }).finally(() => {
@@ -1146,13 +1215,17 @@ buildPreviewChannel.addEventListener("message", (event) => {
     return;
   }
   if (event.data.type === SANDBOX_TYPES.SOURCES) {
+    const openRecoveredBuild = recoveringBuildPreview && recoveredPreviewWasActive;
     reconcileBuildSources(event.data.sources);
-    elements.loadBuild.disabled = false;
+    recoveringBuildPreview = false;
+    recoveredPreviewWasActive = false;
+    elements.loadBuild.disabled = !buildFiles.length;
     elements.clearBuild.disabled = false;
     setBuildStatus(
       `Build loaded. Found ${buildStore.state.colorEntries.length} editable color${buildStore.state.colorEntries.length === 1 ? "" : "s"}.`,
       "success",
     );
+    if (openRecoveredBuild) setMode("build");
     return;
   }
   if (event.data.type === SANDBOX_TYPES.INSPECT_RESULT) {
@@ -1169,7 +1242,9 @@ buildPreviewChannel.addEventListener("message", (event) => {
     setBuildStatus(event.data.error || "Unable to load the build.", "error");
     if (activeMode === "build") renderBuildState();
   }
-});
+}
+
+buildPreviewChannel.addEventListener("message", handleBuildPreviewMessage);
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId !== previewTabId) return;
@@ -1212,4 +1287,5 @@ chrome.runtime.onMessage.addListener((message) => {
 
 updateInspectorButtons();
 renderBuildState();
+recoverBuildPreview().catch(() => {});
 loadActiveSession();

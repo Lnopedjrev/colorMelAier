@@ -565,6 +565,13 @@ async function detachTab(tabId) {
 }
 
 async function applyUpdatesToFrames(tab, session, updates) {
+  if (!(session.frameSnapshots instanceof Map)) {
+    const scan = await scanTab(tab);
+    session.frameSnapshots = scan.frameSnapshots;
+    session.inaccessibleFrames = scan.inaccessibleFrames;
+    session.snapshot = scan.snapshot;
+  }
+
   const updatesByFrame = new Map();
   for (const update of updates || []) {
     const identity = localSourceIdentity(update?.id);

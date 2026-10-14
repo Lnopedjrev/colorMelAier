@@ -35,6 +35,9 @@
     "fill",
     "stroke",
   ];
+  const PAGE_HOOK_START_EVENT = "ct:page-hooks-start";
+  const PAGE_HOOK_STOP_EVENT = "ct:page-hooks-stop";
+  const PAGE_SOURCES_CHANGED_EVENT = "ct:page-sources-changed";
   const records = new Map();
   const ownerIds = new WeakMap();
   const sheetIds = new WeakMap();
@@ -44,6 +47,7 @@
   let observedRoots = [];
   let mutationTimer = null;
   let pendingFullScan = false;
+  let pendingFrameTopologyScan = false;
   const pendingOwners = new Set();
   let applyingUpdates = false;
   let lastSkipped = 0;
@@ -432,12 +436,14 @@
       }
       if (isTrackableStyle(mutation.target)) {
         pendingOwners.add(mutation.target);
-      } else if (
-        [...mutation.addedNodes, ...mutation.removedNodes].some(
-          subtreeContainsSource,
-        )
-      ) {
-        pendingFullScan = true;
+      } else {
+        const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+        if (changedNodes.some(containsFrame)) {
+          pendingFrameTopologyScan = true;
+          pendingFullScan = true;
+        } else if (changedNodes.some(subtreeContainsSource)) {
+          pendingFullScan = true;
+        }
       }
     }
     if (!pendingFullScan && !pendingOwners.size) return;
@@ -471,21 +477,24 @@
     return true;
   }
 
-  function sendSourcesChanged(nextSnapshot) {
+  function sendSourcesChanged(nextSnapshot, rescanFrames = false) {
     sendRuntimeMessage({
       type: TYPES.SOURCES_CHANGED,
       snapshot: nextSnapshot,
+      rescanFrames,
     });
   }
 
   function flushMutations() {
     mutationTimer = null;
     const fullScan = pendingFullScan;
+    const rescanFrames = pendingFrameTopologyScan;
     const owners = Array.from(pendingOwners);
     pendingFullScan = false;
+    pendingFrameTopologyScan = false;
     pendingOwners.clear();
     if (fullScan) {
-      sendSourcesChanged(scanAll());
+      sendSourcesChanged(scanAll(), rescanFrames);
       return;
     }
     let changed = false;
@@ -497,6 +506,17 @@
     pendingFullScan = true;
     clearTimeout(mutationTimer);
     mutationTimer = setTimeout(flushMutations, 100);
+  }
+
+  function containsFrame(node) {
+    return (
+      node?.nodeType === Node.ELEMENT_NODE &&
+      (node.matches("iframe, frame") || Boolean(node.querySelector("iframe, frame")))
+    );
+  }
+
+  function handlePageSourceChange() {
+    if (!applyingUpdates) scheduleFullScan();
   }
 
   function applyUpdate(record, update) {
@@ -807,6 +827,11 @@
   function detach() {
     clearTimeout(mutationTimer);
     observer?.disconnect();
+    document.removeEventListener(
+      PAGE_SOURCES_CHANGED_EVENT,
+      handlePageSourceChange,
+    );
+    document.dispatchEvent(new Event(PAGE_HOOK_STOP_EVENT));
     clearInspector();
     applyingUpdates = true;
     try {
@@ -853,6 +878,8 @@
     }
   }
 
+  document.addEventListener(PAGE_SOURCES_CHANGED_EVENT, handlePageSourceChange);
+  document.dispatchEvent(new Event(PAGE_HOOK_START_EVENT));
   runtime.onMessage.addListener(handleMessage);
   globalThis.__COLOR_TWEAKER_CONTROLLER__ = { detach };
 })();

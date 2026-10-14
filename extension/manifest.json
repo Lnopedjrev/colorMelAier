@@ -9,7 +9,8 @@
     "scripting",
     "sidePanel",
     "storage",
-    "tabs"
+    "tabs",
+    "webNavigation"
   ],
   "optional_host_permissions": [
     "http://*/*",

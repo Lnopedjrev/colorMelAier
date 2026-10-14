@@ -296,14 +296,19 @@ function stopInspectorForTab(tabId) {
   clearInspectorUi();
 }
 
-function originPatterns(unreadableStylesheets) {
+function originPatterns(snapshot) {
   const patterns = new Set();
-  for (const source of unreadableStylesheets || []) {
+  const protectedResources = [
+    ...(snapshot?.unreadableStylesheets || []),
+    ...(snapshot?.permissionRequired || []),
+    ...(snapshot?.inaccessibleFrames || []),
+  ];
+  for (const source of protectedResources) {
     try {
-      const url = new URL(source.href);
+      const url = new URL(source.href || source.url);
       if (/^https?:$/.test(url.protocol)) patterns.add(`${url.origin}/*`);
     } catch {
-      // Invalid stylesheet URLs remain visible in the skipped count.
+      // Non-requestable URLs remain visible in source access errors.
     }
   }
   return Array.from(patterns);
@@ -455,7 +460,12 @@ function renderRemoteFailures(snapshot) {
   for (const failure of failures) {
     const item = document.createElement("div");
     item.className = "remote-failure";
-    item.textContent = `${failure.href}: ${failure.error}`;
+    const context = failure.importedBy
+      ? ` (imported by ${failure.importedBy})`
+      : failure.frameId > 0
+        ? ` (frame ${failure.frameId})`
+        : "";
+    item.textContent = `${failure.href || "Frame source"}: ${failure.error}${context}`;
     elements.remoteFailureList.append(item);
   }
 }
@@ -650,11 +660,11 @@ async function renderSession(session, tab = null) {
     setTabStatus("Not attached.");
   }
 
-  const patterns = originPatterns(snapshot?.unreadableStylesheets);
+  const patterns = originPatterns(snapshot);
   elements.grantAccess.hidden = !patterns.length;
   elements.grantAccess.dataset.origins = JSON.stringify(patterns);
   elements.grantAccess.textContent = patterns.length
-    ? `Allow access to ${patterns.length} stylesheet origin${patterns.length === 1 ? "" : "s"}`
+    ? `Allow access to ${patterns.length} source origin${patterns.length === 1 ? "" : "s"}`
     : "";
 
   if (!session?.tabId || !snapshot) {
@@ -1093,7 +1103,7 @@ elements.grantAccess.addEventListener("click", async () => {
   try {
     const granted = await chrome.permissions.request({ origins });
     if (!granted) {
-      setTabStatus("Stylesheet access was not granted.", "error");
+      setTabStatus("Source access was not granted.", "error");
       return;
     }
     const response = await request(MESSAGE_TYPES.SCAN_REQUEST);

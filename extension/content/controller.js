@@ -2,6 +2,13 @@
   "use strict";
 
   if (globalThis.__COLOR_TWEAKER_CONTROLLER__) return;
+  const runtime = globalThis.chrome?.runtime;
+  if (
+    typeof runtime?.sendMessage !== "function" ||
+    typeof runtime?.onMessage?.addListener !== "function"
+  ) {
+    return;
+  }
 
   const TYPES = {
     PING: "ct:ping",
@@ -28,6 +35,9 @@
     "fill",
     "stroke",
   ];
+  const PAGE_HOOK_START_EVENT = "ct:page-hooks-start";
+  const PAGE_HOOK_STOP_EVENT = "ct:page-hooks-stop";
+  const PAGE_SOURCES_CHANGED_EVENT = "ct:page-sources-changed";
   const records = new Map();
   const ownerIds = new WeakMap();
   const sheetIds = new WeakMap();
@@ -37,12 +47,23 @@
   let observedRoots = [];
   let mutationTimer = null;
   let pendingFullScan = false;
+  let pendingFrameTopologyScan = false;
   const pendingOwners = new Set();
   let applyingUpdates = false;
   let lastSkipped = 0;
   let inspectorMode = "off";
   let inspectorStyle = null;
   let frozenOverlay = null;
+
+  function sendRuntimeMessage(message) {
+    try {
+      const pending = runtime.sendMessage(message);
+      pending?.catch?.(() => {});
+    } catch {
+      // An already-injected controller can outlive an extension reload. Its
+      // runtime API is then invalid, so mutation notifications are discarded.
+    }
+  }
 
   function sourceId(owner, prefix, idMap = ownerIds) {
     let id = idMap.get(owner);
@@ -110,7 +131,7 @@
   }
 
   function watchStylesheetLoad(link) {
-    const href = link.href;
+    const href = linkedStylesheetHref(link);
     if (watchedLinkHrefs.get(link) === href) return;
     watchedLinkHrefs.set(link, href);
     link.addEventListener(
@@ -120,6 +141,10 @@
       },
       { once: true },
     );
+  }
+
+  function linkedStylesheetHref(link) {
+    return link.sheet?.href || link.href;
   }
 
   function restoreRecord(record) {
@@ -280,6 +305,7 @@
       const id = sourceId(link, "linked");
       const serialized = serializeStyleSheet(link.sheet);
       const inaccessible = !serialized.readable;
+      const href = linkedStylesheetHref(link);
       context.skipped += serialized.skipped;
       const previous = records.get(id);
       mergeRecord(
@@ -288,7 +314,7 @@
           name: link.getAttribute("href") || id,
           kind: "linked",
           order: context.order++,
-          href: link.href,
+          href,
         },
         link,
         inaccessible ? previous?.remoteText || "" : serialized.text,
@@ -415,12 +441,14 @@
       }
       if (isTrackableStyle(mutation.target)) {
         pendingOwners.add(mutation.target);
-      } else if (
-        [...mutation.addedNodes, ...mutation.removedNodes].some(
-          subtreeContainsSource,
-        )
-      ) {
-        pendingFullScan = true;
+      } else {
+        const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+        if (changedNodes.some(containsFrame)) {
+          pendingFrameTopologyScan = true;
+          pendingFullScan = true;
+        } else if (changedNodes.some(subtreeContainsSource)) {
+          pendingFullScan = true;
+        }
       }
     }
     if (!pendingFullScan && !pendingOwners.size) return;
@@ -454,20 +482,24 @@
     return true;
   }
 
-  function sendSourcesChanged(nextSnapshot) {
-    chrome.runtime
-      .sendMessage({ type: TYPES.SOURCES_CHANGED, snapshot: nextSnapshot })
-      .catch(() => {});
+  function sendSourcesChanged(nextSnapshot, rescanFrames = false) {
+    sendRuntimeMessage({
+      type: TYPES.SOURCES_CHANGED,
+      snapshot: nextSnapshot,
+      rescanFrames,
+    });
   }
 
   function flushMutations() {
     mutationTimer = null;
     const fullScan = pendingFullScan;
+    const rescanFrames = pendingFrameTopologyScan;
     const owners = Array.from(pendingOwners);
     pendingFullScan = false;
+    pendingFrameTopologyScan = false;
     pendingOwners.clear();
     if (fullScan) {
-      sendSourcesChanged(scanAll());
+      sendSourcesChanged(scanAll(), rescanFrames);
       return;
     }
     let changed = false;
@@ -479,6 +511,17 @@
     pendingFullScan = true;
     clearTimeout(mutationTimer);
     mutationTimer = setTimeout(flushMutations, 100);
+  }
+
+  function containsFrame(node) {
+    return (
+      node?.nodeType === Node.ELEMENT_NODE &&
+      (node.matches("iframe, frame") || Boolean(node.querySelector("iframe, frame")))
+    );
+  }
+
+  function handlePageSourceChange() {
+    if (!applyingUpdates) scheduleFullScan();
   }
 
   function applyUpdate(record, update) {
@@ -711,12 +754,10 @@
       ? collectElementColors(element, clientX, clientY)
       : [];
     clearInspector();
-    chrome.runtime
-      .sendMessage({
-        type: TYPES.INSPECT_RESULT,
-        candidates,
-      })
-      .catch(() => {});
+    sendRuntimeMessage({
+      type: TYPES.INSPECT_RESULT,
+      candidates,
+    });
   }
 
   function deepestElementFromPoint(clientX, clientY) {
@@ -791,6 +832,11 @@
   function detach() {
     clearTimeout(mutationTimer);
     observer?.disconnect();
+    document.removeEventListener(
+      PAGE_SOURCES_CHANGED_EVENT,
+      handlePageSourceChange,
+    );
+    document.dispatchEvent(new Event(PAGE_HOOK_STOP_EVENT));
     clearInspector();
     applyingUpdates = true;
     try {
@@ -801,7 +847,11 @@
       applyingUpdates = false;
     }
     records.clear();
-    chrome.runtime.onMessage.removeListener(handleMessage);
+    try {
+      runtime.onMessage.removeListener(handleMessage);
+    } catch {
+      // The extension may have been reloaded while this controller was active.
+    }
     delete globalThis.__COLOR_TWEAKER_CONTROLLER__;
   }
 
@@ -833,6 +883,8 @@
     }
   }
 
-  chrome.runtime.onMessage.addListener(handleMessage);
+  document.addEventListener(PAGE_SOURCES_CHANGED_EVENT, handlePageSourceChange);
+  document.dispatchEvent(new Event(PAGE_HOOK_START_EVENT));
+  runtime.onMessage.addListener(handleMessage);
   globalThis.__COLOR_TWEAKER_CONTROLLER__ = { detach };
 })();

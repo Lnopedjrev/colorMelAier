@@ -10,6 +10,8 @@ import {
 
 const SANDBOX_TYPES = Object.freeze({
   HOST_READY: "ct:build-preview-host-ready",
+  STATE_REQUEST: "ct:build-preview-state-request",
+  SOURCES_REQUEST: "ct:build-sources-request",
   CLEAR: "ct:build-preview-clear",
   READY: "ct:sandbox-ready",
   LOAD: "ct:sandbox-load-build",
@@ -27,14 +29,17 @@ const parser = createCssParser(colorAdapter);
 const tabStores = new Map();
 const selectedSourceIds = new Map();
 const colorRows = new Map();
+const panelAnimations = new WeakMap();
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let autoScrollFrame = null;
 let activeMode = "tab";
 let activeTab = null;
 let activeSession = null;
 let inspectorMode = "off";
 let renderSequence = 0;
 let applyTimer = null;
-const buildPreviewSessionId = crypto.randomUUID();
-const buildPreviewChannel = new BroadcastChannel(
+let buildPreviewSessionId = crypto.randomUUID();
+let buildPreviewChannel = new BroadcastChannel(
   `ct-build-preview:${buildPreviewSessionId}`,
 );
 const previewReadyWaiters = new Set();
@@ -48,8 +53,12 @@ let buildName = "uploaded-build";
 const buildSourceOverrides = new Map();
 let buildRequestSequence = 0;
 let activeBuildRequestId = null;
+let recoveringBuildPreview = false;
+let recoveredPreviewWasActive = false;
 
 const elements = {
+  sidepanelTop: document.getElementById("sidepanel-top"),
+  quickNavButtons: document.querySelectorAll("[data-nav-direction]"),
   modeTab: document.getElementById("mode-tab"),
   modeBuild: document.getElementById("mode-build"),
   tabPanel: document.getElementById("tab-panel"),
@@ -70,6 +79,9 @@ const elements = {
   grantAccess: document.getElementById("grant-access"),
   remoteFailures: document.getElementById("remote-failures"),
   remoteFailureList: document.getElementById("remote-failure-list"),
+  scanSummary: document.getElementById("scan-summary"),
+  colorsPanel: document.getElementById("colors-panel"),
+  sourcesPanel: document.getElementById("sources-panel"),
   sourceCount: document.getElementById("source-count"),
   colorCount: document.getElementById("color-count"),
   skippedCount: document.getElementById("skipped-count"),
@@ -85,6 +97,190 @@ const elements = {
   applySource: document.getElementById("apply-source"),
 };
 
+function clearPanelAnimationStyles(content) {
+  content.style.removeProperty("height");
+  content.style.removeProperty("opacity");
+  content.style.removeProperty("overflow");
+}
+
+function setPanelOpen(panel, open, animate = true) {
+  const content = panel.querySelector(":scope > .collapsible-content");
+  const summary = panel.querySelector(":scope > .section-summary");
+  if (!content || !summary) return Promise.resolve();
+
+  const running = panelAnimations.get(panel);
+  if (running?.target === open) return running.promise;
+  if (!running && panel.dataset.expanded === String(open)) {
+    return Promise.resolve();
+  }
+
+  const startHeight = panel.open ? content.getBoundingClientRect().height : 0;
+  running?.animation.cancel();
+  running?.resolve();
+  panelAnimations.delete(panel);
+
+  if (!panel.open) panel.open = true;
+  panel.dataset.expanded = String(open);
+  summary.setAttribute("aria-expanded", String(open));
+
+  if (!animate || reducedMotion.matches) {
+    panel.open = open;
+    clearPanelAnimationStyles(content);
+    return Promise.resolve();
+  }
+
+  const endHeight = open ? content.scrollHeight : 0;
+  content.style.height = `${startHeight}px`;
+  content.style.overflow = "hidden";
+  const animation = content.animate(
+    [
+      { height: `${startHeight}px`, opacity: startHeight ? 1 : 0 },
+      { height: `${endHeight}px`, opacity: open ? 1 : 0 },
+    ],
+    {
+      duration: open ? 320 : 260,
+      easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+      fill: "forwards",
+    },
+  );
+
+  let resolveAnimation;
+  const promise = new Promise((resolve) => {
+    resolveAnimation = resolve;
+  });
+  const state = {
+    animation,
+    promise,
+    resolve: resolveAnimation,
+    target: open,
+  };
+  panelAnimations.set(panel, state);
+
+  animation.finished
+    .then(() => {
+      if (panelAnimations.get(panel) !== state) return;
+      panelAnimations.delete(panel);
+      animation.cancel();
+      panel.open = open;
+      clearPanelAnimationStyles(content);
+      resolveAnimation();
+    })
+    .catch(() => {});
+  return promise;
+}
+
+function setupCollapsiblePanel(panel) {
+  const summary = panel.querySelector(":scope > .section-summary");
+  if (!summary) return;
+  panel.dataset.expanded = String(panel.open);
+  summary.setAttribute("aria-expanded", String(panel.open));
+  summary.addEventListener("click", (event) => {
+    event.preventDefault();
+    setPanelOpen(panel, panel.dataset.expanded !== "true");
+  });
+}
+
+function cancelAutoScroll() {
+  if (autoScrollFrame !== null) cancelAnimationFrame(autoScrollFrame);
+  autoScrollFrame = null;
+}
+
+function scrollToElement(element, alignment = "center") {
+  cancelAutoScroll();
+  const scroller = document.scrollingElement;
+  if (!scroller) return;
+  const start = scroller.scrollTop;
+  const rect = element.getBoundingClientRect();
+  const maximum = Math.max(0, scroller.scrollHeight - window.innerHeight);
+  const offset =
+    alignment === "start"
+      ? element === elements.sidepanelTop
+        ? 0
+        : 12
+      : (window.innerHeight - rect.height) / 2;
+  const target =
+    element === elements.sidepanelTop
+      ? 0
+      : Math.min(maximum, Math.max(0, start + rect.top - offset));
+  const distance = target - start;
+  if (reducedMotion.matches || Math.abs(distance) < 2) {
+    scroller.scrollTop = target;
+    return;
+  }
+
+  const duration = Math.min(700, Math.max(380, 320 + Math.abs(distance) * 0.24));
+  const startedAt = performance.now();
+  const step = (now) => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased =
+      progress < 0.5
+        ? 4 * progress ** 3
+        : 1 - (-2 * progress + 2) ** 3 / 2;
+    scroller.scrollTop = start + distance * eased;
+    if (progress < 1) autoScrollFrame = requestAnimationFrame(step);
+    else autoScrollFrame = null;
+  };
+  autoScrollFrame = requestAnimationFrame(step);
+}
+
+function navigationSections() {
+  const controls = activeMode === "build" ? elements.buildPanel : elements.tabPanel;
+  return [
+    elements.sidepanelTop,
+    controls,
+    elements.colorsPanel,
+    elements.sourcesPanel,
+  ].filter((section) => section && !section.hidden);
+}
+
+function directionalTarget(direction) {
+  const scroller = document.scrollingElement;
+  if (!scroller) return null;
+  const position = scroller.scrollTop;
+  const maximum = Math.max(0, scroller.scrollHeight - window.innerHeight);
+  if (direction === "previous" && position <= 2) return null;
+  if (direction !== "previous" && position >= maximum - 2) return null;
+  const sections = navigationSections().map((element) => ({
+    element,
+    top: position + element.getBoundingClientRect().top,
+  }));
+  if (direction === "previous") {
+    return (
+      sections.reverse().find((section) => section.top < position - 24)
+        ?.element || null
+    );
+  }
+  return sections.find((section) => section.top > position + 24)?.element || null;
+}
+
+function updateQuickNav() {
+  for (const button of elements.quickNavButtons) {
+    button.disabled = !directionalTarget(button.dataset.navDirection);
+  }
+}
+
+async function navigateToSection(direction) {
+  const target = directionalTarget(direction);
+  if (!target) return;
+  if (target.matches(".collapsible-panel")) {
+    await setPanelOpen(target, true);
+  }
+  scrollToElement(target, "start");
+}
+
+let quickNavUpdateFrame = null;
+function scheduleQuickNavUpdate() {
+  if (quickNavUpdateFrame !== null) return;
+  quickNavUpdateFrame = requestAnimationFrame(() => {
+    quickNavUpdateFrame = null;
+    updateQuickNav();
+  });
+}
+
+window.addEventListener("wheel", cancelAutoScroll, { passive: true });
+window.addEventListener("touchstart", cancelAutoScroll, { passive: true });
+window.addEventListener("scroll", scheduleQuickNavUpdate, { passive: true });
+
 function createStore(scope, tabId = null) {
   const state = createColorTweakerState({ cssMode: scope });
   const sourceStore = createCssSourceStore({
@@ -93,7 +289,13 @@ function createStore(scope, tabId = null) {
     extractAlpha: colorAdapter.extractAlpha,
     hexToRgba: colorAdapter.hexToRgba,
   });
-  return { scope, tabId, state, sourceStore };
+  return {
+    scope,
+    tabId,
+    state,
+    sourceStore,
+    applyQueue: Promise.resolve(),
+  };
 }
 
 const buildStore = createStore("build");
@@ -196,10 +398,24 @@ function updateInspectorButtons() {
   const frozen = inspectorMode === "frozen";
   elements.inspect.classList.toggle("active", inspecting);
   elements.inspect.setAttribute("aria-pressed", String(inspecting));
-  elements.inspect.textContent = inspecting ? "Inspecting…" : "Inspect";
+  elements.inspect.setAttribute(
+    "aria-label",
+    inspecting ? "Stop inspecting colors" : "Inspect a rendered element's colors",
+  );
+  elements.inspect.dataset.tooltip = inspecting
+    ? "Stop inspecting colors"
+    : "Inspect a rendered element's colors";
   elements.frozenInspect.classList.toggle("active", frozen);
   elements.frozenInspect.setAttribute("aria-pressed", String(frozen));
-  elements.frozenInspect.textContent = frozen ? "Frozen…" : "Frozen";
+  elements.frozenInspect.setAttribute(
+    "aria-label",
+    frozen
+      ? "Stop frozen inspection"
+      : "Inspect without normal page interaction",
+  );
+  elements.frozenInspect.dataset.tooltip = frozen
+    ? "Stop frozen inspection"
+    : "Inspect without normal page interaction";
 }
 
 function clearInspectorUi() {
@@ -210,6 +426,38 @@ function clearInspectorUi() {
 function postToBuildPreview(type, payload = {}) {
   if (!previewReady) throw new Error("The build preview tab is not ready.");
   buildPreviewChannel.postMessage({ type, ...payload });
+}
+
+function connectBuildPreviewSession(sessionId) {
+  if (!sessionId || sessionId === buildPreviewSessionId) return;
+  buildPreviewChannel.close();
+  buildPreviewSessionId = sessionId;
+  buildPreviewChannel = new BroadcastChannel(`ct-build-preview:${sessionId}`);
+  buildPreviewChannel.addEventListener("message", handleBuildPreviewMessage);
+}
+
+async function recoverBuildPreview() {
+  const previewUrl = chrome.runtime.getURL("build-preview/index.html");
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  const candidates = tabs
+    .filter((tab) => tab.url?.startsWith(previewUrl))
+    .sort(
+      (left, right) =>
+        Number(Boolean(right.active)) - Number(Boolean(left.active)) ||
+        (right.lastAccessed || 0) - (left.lastAccessed || 0),
+    );
+  const tab = candidates[0];
+  if (!Number.isInteger(tab?.id)) return;
+
+  const sessionId = new URL(tab.url).searchParams.get("session");
+  if (!sessionId) return;
+
+  connectBuildPreviewSession(sessionId);
+  previewTabId = tab.id;
+  previewReady = false;
+  recoveringBuildPreview = true;
+  recoveredPreviewWasActive = Boolean(tab.active);
+  buildPreviewChannel.postMessage({ type: SANDBOX_TYPES.STATE_REQUEST });
 }
 
 function markPreviewReady() {
@@ -279,14 +527,19 @@ function stopInspectorForTab(tabId) {
   clearInspectorUi();
 }
 
-function originPatterns(unreadableStylesheets) {
+function originPatterns(snapshot) {
   const patterns = new Set();
-  for (const source of unreadableStylesheets || []) {
+  const protectedResources = [
+    ...(snapshot?.unreadableStylesheets || []),
+    ...(snapshot?.permissionRequired || []),
+    ...(snapshot?.inaccessibleFrames || []),
+  ];
+  for (const source of protectedResources) {
     try {
-      const url = new URL(source.href);
+      const url = new URL(source.href || source.url);
       if (/^https?:$/.test(url.protocol)) patterns.add(`${url.origin}/*`);
     } catch {
-      // Invalid stylesheet URLs remain visible in the skipped count.
+      // Non-requestable URLs remain visible in source access errors.
     }
   }
   return Array.from(patterns);
@@ -438,7 +691,12 @@ function renderRemoteFailures(snapshot) {
   for (const failure of failures) {
     const item = document.createElement("div");
     item.className = "remote-failure";
-    item.textContent = `${failure.href}: ${failure.error}`;
+    const context = failure.importedBy
+      ? ` (imported by ${failure.importedBy})`
+      : failure.frameId > 0
+        ? ` (frame ${failure.frameId})`
+        : "";
+    item.textContent = `${failure.href || "Frame source"}: ${failure.error}${context}`;
     elements.remoteFailureList.append(item);
   }
 }
@@ -505,9 +763,19 @@ function clearEditor(message) {
   elements.colorCount.textContent = "0";
   elements.skippedCount.textContent = "0";
   setEditingControls(false);
+  setResultsVisibility();
 }
 
-async function applyStore(store) {
+function setResultsVisibility(store = null, skipped = 0) {
+  const sourceCount = store?.state.cssSources.length || 0;
+  const colorCount = store?.state.colorEntries.length || 0;
+  elements.scanSummary.hidden = sourceCount === 0 && colorCount === 0 && skipped === 0;
+  elements.colorsPanel.hidden = colorCount === 0;
+  elements.sourcesPanel.hidden = sourceCount === 0;
+  updateQuickNav();
+}
+
+async function applyStoreNow(store) {
   if (!storeIsEditable(store)) return;
   try {
     const updates = store.sourceStore.getCssSourceUpdates();
@@ -532,6 +800,13 @@ async function applyStore(store) {
   } catch (error) {
     setStatus(error.message, "error");
   }
+}
+
+function applyStore(store) {
+  store.applyQueue = store.applyQueue
+    .catch(() => {})
+    .then(() => applyStoreNow(store));
+  return store.applyQueue;
 }
 
 function scheduleApply(store) {
@@ -599,10 +874,13 @@ async function renderSession(session, tab = null) {
   elements.detach.disabled = !session?.desiredAttached;
 
   const snapshot = session?.snapshot;
+  let store = null;
   if (session?.tabId && snapshot) {
-    await reconcileSnapshot(session.tabId, snapshot, activeMode === "tab");
+    store = await reconcileSnapshot(session.tabId, snapshot, activeMode === "tab");
   }
   if (sequence !== renderSequence || activeMode !== "tab") return;
+
+  setResultsVisibility(store, snapshot?.skipped || 0);
 
   if (!session?.connected) clearInspectorUi();
   setEditingControls(Boolean(session?.connected));
@@ -621,11 +899,11 @@ async function renderSession(session, tab = null) {
     setTabStatus("Not attached.");
   }
 
-  const patterns = originPatterns(snapshot?.unreadableStylesheets);
+  const patterns = originPatterns(snapshot);
   elements.grantAccess.hidden = !patterns.length;
   elements.grantAccess.dataset.origins = JSON.stringify(patterns);
   elements.grantAccess.textContent = patterns.length
-    ? `Allow access to ${patterns.length} stylesheet origin${patterns.length === 1 ? "" : "s"}`
+    ? `Allow access to ${patterns.length} source origin${patterns.length === 1 ? "" : "s"}`
     : "";
 
   if (!session?.tabId || !snapshot) {
@@ -651,6 +929,7 @@ function renderBuildState() {
   elements.sourceCount.textContent = String(buildStore.state.cssSources.length);
   elements.colorCount.textContent = String(buildStore.state.colorEntries.length);
   elements.skippedCount.textContent = "0";
+  setResultsVisibility(buildStore);
 }
 
 async function loadActiveSession() {
@@ -734,15 +1013,27 @@ async function selectInspectedColor(candidates) {
       break;
     }
 
-    for (const row of colorRows.values()) row.classList.remove("inspected");
+    for (const row of colorRows.values()) {
+      row.classList.remove("inspected", "inspect-arrival");
+    }
     clearInspectorUi();
     if (!selected) {
       setStatus("The rendered color is not present in the editable CSS sources.", "error");
       return;
     }
+    await setPanelOpen(elements.colorsPanel, true);
     const row = colorRows.get(selected.id);
-    row?.classList.add("inspected");
-    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (row) {
+      row.classList.add("inspected");
+      void row.offsetWidth;
+      row.classList.add("inspect-arrival");
+      row.addEventListener(
+        "animationend",
+        () => row.classList.remove("inspect-arrival"),
+        { once: true },
+      );
+      requestAnimationFrame(() => scrollToElement(row));
+    }
     setStatus(
       `Selected ${selectedCandidate.property}: ${selectedCandidate.color}`,
       "success",
@@ -890,6 +1181,18 @@ async function showBuildPreview() {
 elements.modeTab.addEventListener("click", () => setMode("tab"));
 elements.modeBuild.addEventListener("click", () => setMode("build"));
 
+for (const helpTip of document.querySelectorAll(".help-tip")) {
+  helpTip.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  helpTip.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+  });
+}
+
 elements.buildFilesInput.addEventListener("change", () => {
   setBuildFiles(
     Array.from(elements.buildFilesInput.files || []).map((file) => ({
@@ -968,6 +1271,8 @@ elements.frozenInspect.addEventListener("click", () => toggleInspector("frozen")
 elements.reset.addEventListener("click", async () => {
   const store = await activeStore();
   if (!store) return;
+  clearTimeout(applyTimer);
+  applyTimer = null;
   store.state.replacements.clear();
   store.state.alphaOverrides.clear();
   if (store.scope === "tab") {
@@ -1051,7 +1356,7 @@ elements.grantAccess.addEventListener("click", async () => {
   try {
     const granted = await chrome.permissions.request({ origins });
     if (!granted) {
-      setTabStatus("Stylesheet access was not granted.", "error");
+      setTabStatus("Source access was not granted.", "error");
       return;
     }
     const response = await request(MESSAGE_TYPES.SCAN_REQUEST);
@@ -1061,7 +1366,7 @@ elements.grantAccess.addEventListener("click", async () => {
   }
 });
 
-buildPreviewChannel.addEventListener("message", (event) => {
+function handleBuildPreviewMessage(event) {
   if (!event.data?.type) return;
   if (
     event.data.type === SANDBOX_TYPES.HOST_READY ||
@@ -1074,6 +1379,24 @@ buildPreviewChannel.addEventListener("message", (event) => {
       previewHostInstanceId = event.data.hostInstanceId || previewHostInstanceId;
       if (Number.isInteger(event.data.tabId)) previewTabId = event.data.tabId;
       markPreviewReady();
+      if (recoveringBuildPreview) {
+        if (event.data.buildActive && Number.isInteger(event.data.requestId)) {
+          activeBuildRequestId = event.data.requestId;
+          buildRequestSequence = Math.max(buildRequestSequence, event.data.requestId);
+          buildName = event.data.entryPath
+            ? event.data.entryPath.split("/").pop().replace(/\.html?$/i, "") || buildName
+            : buildName;
+          elements.buildFileSummary.textContent =
+            "Using the build already open in the preview tab.";
+          elements.clearBuild.disabled = false;
+          elements.showBuildPreview.disabled = false;
+          setBuildStatus("Restoring build sources from the preview tab…");
+          postToBuildPreview(SANDBOX_TYPES.SOURCES_REQUEST);
+        } else {
+          recoveringBuildPreview = false;
+          recoveredPreviewWasActive = false;
+        }
+      }
       if (replacedHost && buildLoaded && buildFiles.length && !previewReloading) {
         previewReloading = true;
         loadSelectedBuild({ preserveEdits: true }).finally(() => {
@@ -1094,13 +1417,17 @@ buildPreviewChannel.addEventListener("message", (event) => {
     return;
   }
   if (event.data.type === SANDBOX_TYPES.SOURCES) {
+    const openRecoveredBuild = recoveringBuildPreview && recoveredPreviewWasActive;
     reconcileBuildSources(event.data.sources);
-    elements.loadBuild.disabled = false;
+    recoveringBuildPreview = false;
+    recoveredPreviewWasActive = false;
+    elements.loadBuild.disabled = !buildFiles.length;
     elements.clearBuild.disabled = false;
     setBuildStatus(
       `Build loaded. Found ${buildStore.state.colorEntries.length} editable color${buildStore.state.colorEntries.length === 1 ? "" : "s"}.`,
       "success",
     );
+    if (openRecoveredBuild) setMode("build");
     return;
   }
   if (event.data.type === SANDBOX_TYPES.INSPECT_RESULT) {
@@ -1117,7 +1444,9 @@ buildPreviewChannel.addEventListener("message", (event) => {
     setBuildStatus(event.data.error || "Unable to load the build.", "error");
     if (activeMode === "build") renderBuildState();
   }
-});
+}
+
+buildPreviewChannel.addEventListener("message", handleBuildPreviewMessage);
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId !== previewTabId) return;
@@ -1158,6 +1487,15 @@ chrome.runtime.onMessage.addListener((message) => {
     .catch((error) => setTabStatus(error.message, "error"));
 });
 
+setupCollapsiblePanel(elements.colorsPanel);
+setupCollapsiblePanel(elements.sourcesPanel);
+for (const button of elements.quickNavButtons) {
+  button.addEventListener("click", () => {
+    navigateToSection(button.dataset.navDirection);
+  });
+}
+updateQuickNav();
 updateInspectorButtons();
 renderBuildState();
+recoverBuildPreview().catch(() => {});
 loadActiveSession();

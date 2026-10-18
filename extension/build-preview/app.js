@@ -1,11 +1,14 @@
 const TYPES = Object.freeze({
   HOST_READY: "ct:build-preview-host-ready",
+  STATE_REQUEST: "ct:build-preview-state-request",
+  SOURCES_REQUEST: "ct:build-sources-request",
   CLEAR: "ct:build-preview-clear",
   READY: "ct:sandbox-ready",
   LOADED: "ct:build-loaded",
   ERROR: "ct:build-error",
   WARNING: "ct:build-warning",
   SOURCES: "ct:build-sources",
+  LOAD: "ct:sandbox-load-build",
 });
 
 const sessionId = new URL(location.href).searchParams.get("session");
@@ -17,6 +20,9 @@ const channel = sessionId
 const hostInstanceId = crypto.randomUUID();
 let currentTabId = null;
 let sandboxReady = false;
+let buildActive = false;
+let activeRequestId = null;
+let activeEntryPath = "";
 let queuedMessages = [];
 
 function showStatus(message, error = false) {
@@ -45,9 +51,23 @@ function flushQueue() {
 
 function resetSandbox() {
   sandboxReady = false;
+  buildActive = false;
+  activeRequestId = null;
+  activeEntryPath = "";
   queuedMessages = [];
   showStatus("Waiting for a build from the ColorTweaker side panel…");
   frame.src = "../sandbox/preview.html";
+}
+
+function announceHost() {
+  channel.postMessage({
+    type: TYPES.HOST_READY,
+    tabId: currentTabId,
+    hostInstanceId,
+    buildActive,
+    requestId: activeRequestId,
+    entryPath: activeEntryPath,
+  });
 }
 
 if (!channel) {
@@ -55,9 +75,16 @@ if (!channel) {
 } else {
   channel.addEventListener("message", (event) => {
     if (!event.data?.type) return;
+    if (event.data.type === TYPES.STATE_REQUEST) {
+      announceHost();
+      return;
+    }
     if (event.data.type === TYPES.CLEAR) {
       resetSandbox();
       return;
+    }
+    if (event.data.type === TYPES.LOAD && buildActive) {
+      resetSandbox();
     }
     sendToSandbox(event.data);
   });
@@ -68,6 +95,9 @@ if (!channel) {
       sandboxReady = true;
       flushQueue();
     } else if (event.data.type === TYPES.LOADED) {
+      buildActive = true;
+      activeRequestId = event.data.requestId;
+      activeEntryPath = event.data.entryPath || "";
       showStatus(`Starting ${event.data.entryPath}…`);
     } else if (event.data.type === TYPES.SOURCES) {
       showStatus("");
@@ -85,11 +115,7 @@ if (!channel) {
 
   chrome.tabs.getCurrent().then((tab) => {
     currentTabId = tab?.id ?? null;
-    channel.postMessage({
-      type: TYPES.HOST_READY,
-      tabId: currentTabId,
-      hostInstanceId,
-    });
+    announceHost();
   });
   window.addEventListener("beforeunload", () => {
     channel.close();
